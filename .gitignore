@@ -27,6 +27,9 @@ go.work.sum
 # env file
 .env
 
+# Private project plan
+PROJECT_PLAN.md
+
 # Editor/IDE
 # .idea/
 # .vscode/
