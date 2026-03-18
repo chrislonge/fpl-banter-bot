@@ -6,9 +6,12 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
+	"time"
 
 	"github.com/chrislonge/fpl-banter-bot/internal/config"
+	"github.com/chrislonge/fpl-banter-bot/internal/fpl"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -58,9 +61,31 @@ func main() {
 
 	slog.Info("connected to database")
 
-	// TODO: Run migrations, initialise store, FPL client, poller, stats engine.
-	// For now, we just prove the scaffolding works end-to-end.
-	slog.Info("scaffolding complete — bot ready for next milestone")
+	// Create the FPL API client. We pass a custom *http.Client with an
+	// explicit timeout rather than relying on the default (which has no
+	// timeout at all!). Without a timeout, a hung FPL server could block
+	// the bot forever.
+	//
+	// This follows the same Dependency Injection pattern as pgxpool above:
+	// we configure the transport externally and pass it in.
+	fplClient := fpl.NewClient("https://fantasy.premierleague.com/api", &http.Client{
+		Timeout: 30 * time.Second,
+	})
+
+	// Smoke-test the FPL API on startup, same "fail fast" pattern as the
+	// database ping. If the API is unreachable, we want to know immediately
+	// rather than discovering it when the first gameweek finalizes.
+	status, err := fplClient.GetEventStatus(ctx)
+	if err != nil {
+		slog.Error("failed to reach FPL API", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("FPL API reachable", "leagues_status", status.Leagues)
+
+	// TODO: Run migrations, initialise store, poller, stats engine.
+	// For now, we prove the scaffolding + FPL client work end-to-end.
+	_ = pool // Will be used by the store in Phase 1.3.
+	slog.Info("startup complete — bot ready for next milestone")
 }
 
 // setupLogger configures the global slog logger with the given level.
