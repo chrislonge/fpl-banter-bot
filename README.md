@@ -26,7 +26,18 @@ No manual checking required. Alerts are posted to your group chat automatically.
 ### Prerequisites
 
 - Go 1.21+
-- Docker and Docker Compose
+- Docker and Docker Compose (via [Docker Desktop](https://www.docker.com/products/docker-desktop/) or [OrbStack](https://orbstack.dev/))
+- [`golang-migrate`](https://github.com/golang-migrate/migrate) CLI — used to apply database schema migrations
+
+```bash
+# macOS
+brew install golang-migrate
+```
+
+> **Note:** If you have a local Postgres installed (e.g., via Homebrew or Postgres.app), stop it before starting the Docker database to avoid port 5432 conflicts:
+> ```bash
+> brew services stop postgresql@14  # adjust version as needed
+> ```
 
 ### 1. Clone and configure
 
@@ -43,7 +54,15 @@ cp .env.example .env
 docker compose up -d db
 ```
 
-### 3. Run the bot
+### 3. Run migrations
+
+```bash
+migrate -path internal/store/migrations -database "postgres://fplbot:password@localhost:5432/fplbanterbot?sslmode=disable" up
+```
+
+This only needs to be run once per fresh database, or when new migration files are added.
+
+### 4. Run the bot
 
 ```bash
 go run cmd/bot/main.go
@@ -95,14 +114,42 @@ See `pkg/notify/telegram/` for a reference implementation.
 # Run tests
 go test ./...
 
+# Run tests for a specific package
+go test ./internal/fpl/ -v
+
 # Lint
 golangci-lint run
 
 # Build Docker image (ARM for Raspberry Pi)
 docker build --platform linux/arm64 -t fpl-banter-bot .
+```
 
-# Run database migrations
-migrate -path internal/store/migrations -database "$DATABASE_URL" up
+### Database management
+
+```bash
+# Start the dev database
+docker compose up -d db
+
+# Check container status
+docker compose ps
+
+# View database logs
+docker compose logs db
+
+# Run migrations
+migrate -path internal/store/migrations -database "postgres://fplbot:password@localhost:5432/fplbanterbot?sslmode=disable" up
+
+# Roll back the last migration
+migrate -path internal/store/migrations -database "postgres://fplbot:password@localhost:5432/fplbanterbot?sslmode=disable" down 1
+
+# Connect to the database directly
+docker exec -it fpl-banter-bot-db-1 psql -U fplbot -d fplbanterbot
+
+# Stop the database (data is preserved)
+docker compose down
+
+# Stop the database and delete all data (fresh start)
+docker compose down -v
 ```
 
 ## License
