@@ -27,10 +27,10 @@ No manual checking required. Alerts are posted to your group chat automatically.
 
 - Go 1.21+
 - Docker and Docker Compose (via [Docker Desktop](https://www.docker.com/products/docker-desktop/) or [OrbStack](https://orbstack.dev/))
-- [`golang-migrate`](https://github.com/golang-migrate/migrate) CLI — used to apply database schema migrations
+- (Optional) [`golang-migrate`](https://github.com/golang-migrate/migrate) CLI — only needed for manual migration management. The bot runs migrations automatically on startup.
 
 ```bash
-# macOS
+# macOS (optional)
 brew install golang-migrate
 ```
 
