@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -42,6 +43,10 @@ type Client struct {
 	baseURL    string       // e.g., "https://fantasy.premierleague.com/api"
 	httpClient *http.Client // the actual HTTP transport
 }
+
+// maxH2HStandingsPages is a defensive guard to prevent infinite pagination
+// if the upstream API misbehaves and never returns has_next=false.
+const maxH2HStandingsPages = 1000
 
 // NewClient creates a new FPL API client.
 //
@@ -143,6 +148,20 @@ func (c *Client) do(ctx context.Context, path string, target any) error {
 	// Check for non-200 status codes. The FPL API returns 200 on success,
 	// 404 for bad IDs, and 503 during peak load.
 	if resp.StatusCode != http.StatusOK {
+		const maxErrorBodyBytes = 4096
+
+		var bodySnippet string
+		if resp.Body != nil {
+			limited := io.LimitReader(resp.Body, maxErrorBodyBytes)
+			if b, readErr := io.ReadAll(limited); readErr == nil && len(b) > 0 {
+				bodySnippet = strings.TrimSpace(string(b))
+			}
+		}
+
+		if bodySnippet != "" {
+			return fmt.Errorf("unexpected status %d for %s: %s", resp.StatusCode, path, bodySnippet)
+		}
+
 		return fmt.Errorf("unexpected status %d for %s", resp.StatusCode, path)
 	}
 
@@ -257,7 +276,11 @@ func (c *Client) GetAllH2HStandings(ctx context.Context, leagueID int) (H2HStand
 		if !resp.Standings.HasNext {
 			break
 		}
+
 		page++
+		if page > maxH2HStandingsPages {
+			return H2HStandingsResponse{}, fmt.Errorf("reached maximum H2H standings pages (%d) without seeing has_next=false", maxH2HStandingsPages)
+		}
 	}
 
 	all.Standings.HasNext = false
