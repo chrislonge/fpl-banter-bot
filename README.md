@@ -142,11 +142,28 @@ FPL_LIVE_TEST=1 go test ./internal/fpl/ -run TestLiveAPI_ManagerHistory -v
 
 These tests require network access and will fail if the FPL API is unavailable. Use them to validate that your struct definitions still match the live API responses.
 
+### Store integration tests
+
+The `internal/store` package includes integration tests against a real Postgres database. They are gated behind the `STORE_TEST_DATABASE_URL` env var and skip gracefully without it.
+
+```bash
+# Using make (loads .env automatically)
+make test-store
+
+# Or manually
+STORE_TEST_DATABASE_URL="postgres://fplbot:password@localhost:5432/fplbanterbot_test?sslmode=disable" \
+  go test ./internal/store/ -v
+```
+
+The test database (`fplbanterbot_test`) is created automatically by `init.sql` on first Postgres startup. If your Postgres volume already exists, run `make db-reset` once to recreate it.
+
 ### Database management
+
+Migrations run automatically on startup via embedded SQL files — no CLI tool needed for normal use. The `golang-migrate` CLI is optional, useful for manual inspection or rollbacks.
 
 ```bash
 # Start the dev database
-docker compose up -d db
+make db-up
 
 # Check container status
 docker compose ps
