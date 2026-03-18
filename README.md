@@ -124,6 +124,23 @@ golangci-lint run
 docker build --platform linux/arm64 -t fpl-banter-bot .
 ```
 
+### Live API tests
+
+The `internal/fpl` package includes integration tests that hit the real FPL API. They are skipped by default to keep `go test ./...` fast and CI-safe.
+
+```bash
+# Run all live API tests
+FPL_LIVE_TEST=1 go test ./internal/fpl/ -run TestLiveAPI -v
+
+# Run a specific live test
+FPL_LIVE_TEST=1 go test ./internal/fpl/ -run TestLiveAPI_Bootstrap -v
+FPL_LIVE_TEST=1 go test ./internal/fpl/ -run TestLiveAPI_EventStatus -v
+FPL_LIVE_TEST=1 go test ./internal/fpl/ -run TestLiveAPI_H2HStandings -v
+FPL_LIVE_TEST=1 go test ./internal/fpl/ -run TestLiveAPI_ManagerHistory -v
+```
+
+These tests require network access and will fail if the FPL API is unavailable. Use them to validate that your struct definitions still match the live API responses.
+
 ### Database management
 
 ```bash
