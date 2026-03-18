@@ -48,25 +48,23 @@ cp .env.example .env
 # Edit .env with your Telegram bot token, chat ID, and league ID
 ```
 
+`.env.example` is the documented template (committed to git). `.env` holds your local values and is gitignored — never commit it.
+
 ### 2. Start the database
 
 ```bash
-docker compose up -d db
+make db-up
+# or: docker compose up -d db
 ```
 
-### 3. Run migrations
+### 3. Run the bot
 
 ```bash
-migrate -path internal/store/migrations -database "postgres://fplbot:password@localhost:5432/fplbanterbot?sslmode=disable" up
+make run
+# or: go run cmd/bot/main.go
 ```
 
-This only needs to be run once per fresh database, or when new migration files are added.
-
-### 4. Run the bot
-
-```bash
-go run cmd/bot/main.go
-```
+Migrations run automatically on startup — no manual migration step needed. The migration SQL files are embedded in the binary via Go's `//go:embed`, so there are no external files to deploy.
 
 ## Configuration
 
@@ -87,11 +85,11 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 cmd/bot/             Entrypoint — wires everything together
 internal/config/     Environment variable loading + validation
 internal/fpl/        FPL HTTP client + API response types
-internal/poller/     Gameweek lifecycle state machine
-internal/stats/      Diff engine + alert detection
-internal/store/      Database interface + Postgres implementation
+internal/poller/     Gameweek lifecycle state machine (planned)
+internal/stats/      Diff engine + alert detection (planned)
+internal/store/      Database interface + Postgres implementation + embedded migrations
 pkg/notify/          Notifier interface (public API for chat platforms)
-pkg/notify/telegram/ Telegram implementation
+pkg/notify/telegram/ Telegram implementation (planned)
 ```
 
 `internal/` packages are private to this module (compiler-enforced). `pkg/` is the public API — import `pkg/notify` to build your own chat platform adapter.
@@ -110,19 +108,21 @@ See `pkg/notify/telegram/` for a reference implementation.
 
 ## Development
 
+A `Makefile` wraps common commands so you don't have to remember flags and connection strings. Run `make` with any target below, or use the raw commands directly.
+
 ```bash
-# Run tests
-go test ./...
-
-# Run tests for a specific package
-go test ./internal/fpl/ -v
-
-# Lint
-golangci-lint run
-
-# Build Docker image (ARM for Raspberry Pi)
-docker build --platform linux/arm64 -t fpl-banter-bot .
+make build        # go build ./...
+make test         # go test ./... (store tests skip without DB)
+make test-store   # store integration tests against real Postgres
+make test-all     # all tests including store integration
+make lint         # golangci-lint run
+make run          # go run cmd/bot/main.go
+make db-up        # docker compose up -d db
+make db-down      # docker compose down
+make db-reset     # destroy + recreate DB (needed after schema changes)
 ```
+
+The Makefile automatically loads your `.env` file, so variables like `STORE_TEST_DATABASE_URL` are available without typing them.
 
 ### Live API tests
 
@@ -153,20 +153,18 @@ docker compose ps
 # View database logs
 docker compose logs db
 
-# Run migrations
-migrate -path internal/store/migrations -database "postgres://fplbot:password@localhost:5432/fplbanterbot?sslmode=disable" up
-
-# Roll back the last migration
-migrate -path internal/store/migrations -database "postgres://fplbot:password@localhost:5432/fplbanterbot?sslmode=disable" down 1
-
 # Connect to the database directly
 docker exec -it fpl-banter-bot-db-1 psql -U fplbot -d fplbanterbot
 
 # Stop the database (data is preserved)
-docker compose down
+make db-down
 
 # Stop the database and delete all data (fresh start)
-docker compose down -v
+make db-reset
+
+# Manual migration management (optional, requires golang-migrate CLI)
+migrate -path internal/store/migrations -database "$DATABASE_URL" up
+migrate -path internal/store/migrations -database "$DATABASE_URL" down 1
 ```
 
 ## License
