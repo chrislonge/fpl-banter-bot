@@ -77,6 +77,7 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 | `TELEGRAM_BOT_TOKEN` | Yes | Token from [@BotFather](https://t.me/BotFather) |
 | `TELEGRAM_CHAT_ID` | Yes | Target group chat ID |
 | `DATABASE_URL` | Yes | Postgres connection string |
+| `STORE_TEST_DATABASE_URL` | No | Test database connection string (for integration tests) |
 | `LOG_LEVEL` | No | `debug`, `info`, `warn`, `error` (default: `info`) |
 
 ## Project structure
