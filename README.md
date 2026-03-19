@@ -1,5 +1,7 @@
 # fpl-banter-bot
 
+> **Status:** Early development — Phase 1 of 4 in progress. The FPL client and data store are complete. The poller, stats engine, and Telegram notifier are not yet implemented. Running the bot today starts the database and validates config only.
+
 A self-hosted bot that tracks your Fantasy Premier League mini-league and posts banter-worthy stats to your group chat after each gameweek. Built in Go, runs on a Raspberry Pi.
 
 ## What it does
@@ -120,12 +122,15 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `FPL_LEAGUE_ID` | Yes | Your FPL league ID |
+| `FPL_LEAGUE_ID` | Yes | Your FPL league ID (find it in the URL of your league's page) |
 | `FPL_LEAGUE_TYPE` | No | `h2h` or `classic` (default: `h2h`) |
 | `TELEGRAM_BOT_TOKEN` | Yes | Token from [@BotFather](https://t.me/BotFather) |
 | `TELEGRAM_CHAT_ID` | Yes | Target group chat ID |
 | `DATABASE_URL` | Yes | Postgres connection string |
 | `STORE_TEST_DATABASE_URL` | No | Test database connection string (for integration tests) |
+| `POLL_IDLE_INTERVAL` | No | Seconds between polls when idle (default: `21600` — 6 hours) |
+| `POLL_LIVE_INTERVAL` | No | Seconds between polls during a live gameweek (default: `900` — 15 min) |
+| `POLL_PROCESSING_INTERVAL` | No | Seconds between polls while results are processing (default: `600` — 10 min) |
 | `LOG_LEVEL` | No | `debug`, `info`, `warn`, `error` (default: `info`) |
 
 ## Project structure
@@ -153,7 +158,7 @@ type Notifier interface {
 }
 ```
 
-See `pkg/notify/telegram/` for a reference implementation.
+The Telegram implementation in `pkg/notify/telegram/` (coming in Phase 1.6) will serve as the reference. Any struct with a matching `SendAlerts` method satisfies the interface — no registration or `implements` keyword needed.
 
 ## Development
 
@@ -203,7 +208,7 @@ STORE_TEST_DATABASE_URL="postgres://fplbot:password@localhost:5432/fplbanterbot_
   go test ./internal/store/ -v
 ```
 
-The test database (`fplbanterbot_test`) is created automatically by `init.sql` on first Postgres startup. If your Postgres volume already exists, run `make db-reset` once to recreate it.
+The test database (`fplbanterbot_test`) is created automatically by [`init.sql`](init.sql) on first Postgres startup — this file runs once when Docker initialises a fresh volume. If your Postgres volume already exists, run `make db-reset` once to recreate it.
 
 ### Database management
 
@@ -220,7 +225,7 @@ docker compose ps
 docker compose logs db
 
 # Connect to the database directly
-docker exec -it fpl-banter-bot-db-1 psql -U fplbot -d fplbanterbot
+docker compose exec db psql -U fplbot -d fplbanterbot
 
 # Stop the database (data is preserved)
 make db-down
