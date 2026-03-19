@@ -78,7 +78,7 @@ func TestMain(m *testing.M) {
 func truncateTables(t *testing.T) {
 	t.Helper()
 	_, err := testPool.Exec(context.Background(),
-		"TRUNCATE leagues, managers, gameweek_standings, chip_usage, h2h_results CASCADE",
+		"TRUNCATE leagues, managers, gameweek_standings, chip_usage, h2h_results, gameweek_snapshot_meta CASCADE",
 	)
 	if err != nil {
 		t.Fatalf("failed to truncate tables: %v", err)
@@ -549,6 +549,113 @@ func TestMultiLeagueSameManager(t *testing.T) {
 	}
 	if len(standingsB) != 1 || standingsB[0].Rank != 3 {
 		t.Errorf("league 200 standings = %+v, want Rank=3", standingsB)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GetStoredEventIDs tests
+// ---------------------------------------------------------------------------
+
+func TestGetStoredEventIDs_Empty(t *testing.T) {
+	truncateTables(t)
+	ctx := context.Background()
+
+	seedLeague(t, 100, "Test League", "h2h")
+
+	ids, err := testStore.GetStoredEventIDs(ctx, 100)
+	if err != nil {
+		t.Fatalf("GetStoredEventIDs: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Errorf("len(ids) = %d, want 0", len(ids))
+	}
+}
+
+func TestGetStoredEventIDs_Multiple(t *testing.T) {
+	truncateTables(t)
+	ctx := context.Background()
+
+	seedLeague(t, 100, "Test League", "h2h")
+	seedManager(t, 100, 1001, "Alice", "Alice FC")
+
+	// Insert standings for GWs 2, 5, 10 (out of order).
+	for _, gw := range []int{5, 2, 10} {
+		if err := testStore.UpsertGameweekStanding(ctx, store.GameweekStanding{
+			LeagueID: 100, EventID: gw, ManagerID: 1001,
+			Rank: 1, Points: 10, TotalScore: 100,
+		}); err != nil {
+			t.Fatalf("UpsertGameweekStanding (GW%d): %v", gw, err)
+		}
+	}
+
+	ids, err := testStore.GetStoredEventIDs(ctx, 100)
+	if err != nil {
+		t.Fatalf("GetStoredEventIDs: %v", err)
+	}
+	if len(ids) != 3 {
+		t.Fatalf("len(ids) = %d, want 3", len(ids))
+	}
+	// Should be sorted ascending.
+	want := []int{2, 5, 10}
+	for i, w := range want {
+		if ids[i] != w {
+			t.Errorf("ids[%d] = %d, want %d", i, ids[i], w)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// UpsertSnapshotMeta / GetSnapshotMeta tests
+// ---------------------------------------------------------------------------
+
+func TestUpsertAndGetSnapshotMeta(t *testing.T) {
+	truncateTables(t)
+	ctx := context.Background()
+
+	meta := store.SnapshotMeta{
+		LeagueID:          100,
+		EventID:           5,
+		Source:            "live",
+		StandingsFidelity: "historical",
+	}
+
+	// Insert.
+	if err := testStore.UpsertSnapshotMeta(ctx, meta); err != nil {
+		t.Fatalf("UpsertSnapshotMeta: %v", err)
+	}
+
+	// Read back.
+	got, err := testStore.GetSnapshotMeta(ctx, 100, 5)
+	if err != nil {
+		t.Fatalf("GetSnapshotMeta: %v", err)
+	}
+	if got.Source != "live" || got.StandingsFidelity != "historical" {
+		t.Errorf("got source=%q fidelity=%q, want live/historical", got.Source, got.StandingsFidelity)
+	}
+
+	// Upsert with different values (idempotent update).
+	meta.Source = "backfill"
+	meta.StandingsFidelity = "synthetic"
+	if err := testStore.UpsertSnapshotMeta(ctx, meta); err != nil {
+		t.Fatalf("UpsertSnapshotMeta (update): %v", err)
+	}
+
+	got, err = testStore.GetSnapshotMeta(ctx, 100, 5)
+	if err != nil {
+		t.Fatalf("GetSnapshotMeta after update: %v", err)
+	}
+	if got.Source != "backfill" || got.StandingsFidelity != "synthetic" {
+		t.Errorf("after update: source=%q fidelity=%q, want backfill/synthetic", got.Source, got.StandingsFidelity)
+	}
+}
+
+func TestGetSnapshotMeta_NotFound(t *testing.T) {
+	truncateTables(t)
+	ctx := context.Background()
+
+	_, err := testStore.GetSnapshotMeta(ctx, 999, 1)
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("GetSnapshotMeta(nonexistent) error = %v, want store.ErrNotFound", err)
 	}
 }
 

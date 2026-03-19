@@ -70,6 +70,25 @@ type ChipUsage struct {
 	DetectedAt time.Time // When we first detected this chip usage
 }
 
+// SnapshotMeta records the provenance of a gameweek snapshot — whether
+// the data came from live polling or historical backfill. This matters
+// because backfilled standings reflect the current cumulative values
+// (the FPL API doesn't serve historical snapshots), while chip data IS
+// fully historical. The stats engine uses this to decide which diffs
+// are trustworthy.
+//
+//   - source: "live" (from the poller during normal operation) or
+//     "backfill" (from the backfill command).
+//   - standings_fidelity: "historical" (accurate point-in-time data) or
+//     "synthetic" (current cumulative values applied retroactively).
+type SnapshotMeta struct {
+	LeagueID          int64     // FK to leagues — part of the composite PK
+	EventID           int       // Gameweek number — part of the composite PK
+	Source            string    // "live" or "backfill"
+	StandingsFidelity string    // "historical" or "synthetic"
+	CreatedAt         time.Time // Row creation timestamp
+}
+
 // H2HResult records the outcome of a head-to-head match between two
 // managers in a specific gameweek.
 //

@@ -49,3 +49,12 @@ CREATE TABLE h2h_results (
     FOREIGN KEY (league_id, manager_2_id) REFERENCES managers(league_id, id),
     CHECK (manager_1_id < manager_2_id)
 );
+
+CREATE TABLE gameweek_snapshot_meta (
+    league_id          BIGINT NOT NULL,
+    event_id           INT NOT NULL,
+    source             TEXT NOT NULL,
+    standings_fidelity TEXT NOT NULL,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (league_id, event_id)
+);

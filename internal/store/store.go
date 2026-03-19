@@ -63,6 +63,9 @@ type Store interface {
 	GetManagers(ctx context.Context, leagueID int64) ([]Manager, error)
 	GetLeague(ctx context.Context, leagueID int64) (League, error)
 	GetLatestEventID(ctx context.Context, leagueID int64) (int, error)
+	GetStoredEventIDs(ctx context.Context, leagueID int64) ([]int, error)
+	UpsertSnapshotMeta(ctx context.Context, meta SnapshotMeta) error
+	GetSnapshotMeta(ctx context.Context, leagueID int64, eventID int) (SnapshotMeta, error)
 }
 
 // PostgresStore implements Store using a pgx connection pool.
@@ -289,4 +292,50 @@ func (s *PostgresStore) GetLatestEventID(ctx context.Context, leagueID int64) (i
 	var eventID int
 	err := s.pool.QueryRow(ctx, getLatestEventID, leagueID).Scan(&eventID)
 	return eventID, err
+}
+
+// GetStoredEventIDs returns all distinct event IDs stored in
+// gameweek_standings for a league, sorted ascending. This is used by the
+// backfill command to compute which gameweeks are missing via set difference
+// (finished_events - stored_events), rather than relying on MAX(event_id)
+// which would miss gaps in the middle.
+func (s *PostgresStore) GetStoredEventIDs(ctx context.Context, leagueID int64) ([]int, error) {
+	rows, err := s.pool.Query(ctx, getStoredEventIDs, leagueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// UpsertSnapshotMeta records the provenance (source + fidelity) of a
+// gameweek snapshot. Uses ON CONFLICT DO UPDATE so re-running backfill
+// or re-processing a live gameweek overwrites cleanly.
+func (s *PostgresStore) UpsertSnapshotMeta(ctx context.Context, meta SnapshotMeta) error {
+	_, err := s.pool.Exec(ctx, upsertSnapshotMeta,
+		meta.LeagueID, meta.EventID, meta.Source, meta.StandingsFidelity,
+	)
+	return err
+}
+
+// GetSnapshotMeta retrieves the provenance metadata for a specific gameweek.
+// Returns ErrNotFound if no metadata exists for the given league + event.
+func (s *PostgresStore) GetSnapshotMeta(ctx context.Context, leagueID int64, eventID int) (SnapshotMeta, error) {
+	var m SnapshotMeta
+	err := s.pool.QueryRow(ctx, getSnapshotMeta, leagueID, eventID).Scan(
+		&m.LeagueID, &m.EventID, &m.Source, &m.StandingsFidelity, &m.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return SnapshotMeta{}, ErrNotFound
+	}
+	return m, err
 }
