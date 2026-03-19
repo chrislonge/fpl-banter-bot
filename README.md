@@ -1,6 +1,6 @@
 # fpl-banter-bot
 
-> **Status:** Early development — Phase 1 of 4 in progress. The FPL client and data store are complete. The poller, stats engine, and Telegram notifier are not yet implemented. Running the bot today starts the database and validates config only.
+> **Status:** Early development — Phase 1 of 4 in progress. The FPL client, data store, and polling state machine are complete. The stats engine and Telegram notifier are not yet implemented. Running the bot starts the poller, which polls the FPL API on an adaptive schedule and persists gameweek data automatically.
 
 A self-hosted bot that tracks your Fantasy Premier League mini-league and posts banter-worthy stats to your group chat after each gameweek. Built in Go, runs on a Raspberry Pi.
 
@@ -27,11 +27,11 @@ flowchart LR
 
     subgraph "fpl-banter-bot"
         direction TB
-        MAIN["cmd/bot/main.go\nEntrypoint"]
+        MAIN["cmd/bot/main.go\nEntrypoint + graceful shutdown"]
         CONFIG["config\nEnv vars"]
         CLIENT["fpl.Client\nHTTP client"]
         STORE["store.Store\nPostgres persistence"]
-        POLLER["poller\nGameweek state machine"]
+        POLLER["poller\nIdle → Live → Processing"]
         STATS["stats.Engine\nDiff + alert detection"]
         NOTIFY["notify.Notifier\nChat platform interface"]
     end
@@ -57,7 +57,7 @@ flowchart LR
     style CLIENT fill:#2d6a2d,stroke:#4a4,color:#fff
     style STORE fill:#2d6a2d,stroke:#4a4,color:#fff
     style MAIN fill:#2d6a2d,stroke:#4a4,color:#fff
-    style POLLER fill:#8b6914,stroke:#c90,color:#fff
+    style POLLER fill:#2d6a2d,stroke:#4a4,color:#fff
     style STATS fill:#8b6914,stroke:#c90,color:#fff
     style NOTIFY fill:#8b6914,stroke:#c90,color:#fff
 ```
@@ -116,6 +116,10 @@ make run
 
 Migrations run automatically on startup — no manual migration step needed. The migration SQL files are embedded in the binary via Go's `//go:embed`, so there are no external files to deploy.
 
+The bot starts the polling state machine, which adaptively polls the FPL API based on the gameweek lifecycle (idle between GWs, frequent during live matches, very frequent while waiting for finalization). When a gameweek finalizes, it collects standings and chip usage data and persists them to Postgres.
+
+**Graceful shutdown:** Press `Ctrl+C` or send `SIGTERM` to trigger a clean shutdown. The bot finishes its current poll cycle, closes database connections, and exits.
+
 ## Configuration
 
 All configuration is via environment variables. See [`.env.example`](.env.example) for the full list.
@@ -139,7 +143,7 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 cmd/bot/             Entrypoint — wires everything together
 internal/config/     Environment variable loading + validation
 internal/fpl/        FPL HTTP client + API response types
-internal/poller/     Gameweek lifecycle state machine (planned)
+internal/poller/     Gameweek lifecycle state machine (Idle → Live → Processing)
 internal/stats/      Diff engine + alert detection (planned)
 internal/store/      Database interface + Postgres implementation + embedded migrations
 pkg/notify/          Notifier interface (public API for chat platforms)
@@ -237,6 +241,12 @@ make db-reset
 migrate -path internal/store/migrations -database "$DATABASE_URL" up
 migrate -path internal/store/migrations -database "$DATABASE_URL" down 1
 ```
+
+## Known limitations
+
+- **H2H leagues only** — classic league support is planned but not yet implemented. The bot fails fast on startup if `FPL_LEAGUE_TYPE` is not `h2h`.
+- **No historical backfill** — if the bot is offline for multiple gameweeks, it only captures data for the current gameweek when it comes back. Missed intermediate gameweeks are lost. A backfill command is planned (milestone 4b).
+- **No alerts yet** — the poller collects and persists data, but the stats engine (which generates banter-worthy alerts) and Telegram notifier are not yet implemented.
 
 ## License
 

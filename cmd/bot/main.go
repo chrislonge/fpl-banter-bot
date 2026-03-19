@@ -5,13 +5,17 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/chrislonge/fpl-banter-bot/internal/config"
 	"github.com/chrislonge/fpl-banter-bot/internal/fpl"
+	"github.com/chrislonge/fpl-banter-bot/internal/poller"
 	"github.com/chrislonge/fpl-banter-bot/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -35,9 +39,21 @@ func main() {
 		"league_type", cfg.FPLLeagueType,
 	)
 
-	// context.Background() is the root context — no deadline, no
-	// cancellation. All child contexts are derived from this.
-	ctx := context.Background()
+	// Signal-based graceful shutdown.
+	//
+	// Go pattern — signal.NotifyContext:
+	//
+	// Creates a context that cancels automatically when the process
+	// receives SIGINT (Ctrl+C) or SIGTERM (Docker stop / kill signal).
+	// This is the idiomatic way to wire OS signals into Go's context
+	// system. When the signal fires, ctx.Done() closes, and any
+	// blocking select on ctx.Done() (like the poller's Run loop)
+	// returns immediately — no waiting for timers to expire.
+	//
+	// The stop() function unregisters the signal handler, restoring
+	// default OS behavior. We defer it so cleanup happens on exit.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	// pgxpool.New creates a connection pool. A pool maintains several
 	// open DB connections and reuses them, avoiding the overhead of
@@ -95,9 +111,42 @@ func main() {
 	// and the future stats engine/poller.
 	appStore := store.New(pool)
 
-	// TODO: Wire poller, stats engine, and notifier.
-	_ = appStore // Will be used by the poller in Phase 1.4.
-	slog.Info("startup complete — bot ready for next milestone")
+	// Configure the poller — the adaptive polling state machine that
+	// drives the bot's gameweek lifecycle.
+	//
+	// The Config converts seconds (from env vars) to time.Duration.
+	// New() validates the config — it fails fast if LeagueType != "h2h".
+	pollerCfg := poller.Config{
+		LeagueID:           cfg.FPLLeagueID,
+		LeagueType:         cfg.FPLLeagueType,
+		IdleInterval:       time.Duration(cfg.PollIdleInterval) * time.Second,
+		LiveInterval:       time.Duration(cfg.PollLiveInterval) * time.Second,
+		ProcessingInterval: time.Duration(cfg.PollProcessingInterval) * time.Second,
+	}
+
+	// Create the poller. The nil callback means no stats engine yet —
+	// the poller will collect and persist data but won't generate alerts.
+	// Phase 1.5 will provide the OnGameweekFinalized callback.
+	//
+	// Go pattern — IMPLICIT INTERFACE SATISFACTION:
+	// *fpl.Client satisfies poller.FPLClient, and *store.PostgresStore
+	// satisfies store.Store — no cast or "implements" keyword needed.
+	// This is Go's structural typing in action.
+	p, err := poller.New(fplClient, appStore, pollerCfg, nil)
+	if err != nil {
+		slog.Error("failed to create poller", "error", err)
+		os.Exit(1)
+	}
+
+	// Run the poller. This blocks until the context is cancelled (SIGINT
+	// or SIGTERM). The poller follows the http.ListenAndServe convention:
+	// Run() blocks, and the caller (us) controls lifecycle.
+	slog.Info("starting poller")
+	if err := p.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		slog.Error("poller exited with error", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("shutdown complete")
 }
 
 // setupLogger configures the global slog logger with the given level.
