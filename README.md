@@ -73,7 +73,7 @@ flowchart LR
 
 ### Prerequisites
 
-- Go 1.21+
+- Go 1.26+
 - Docker and Docker Compose (via [Docker Desktop](https://www.docker.com/products/docker-desktop/) or [OrbStack](https://orbstack.dev/))
 - (Optional) [`golang-migrate`](https://github.com/golang-migrate/migrate) CLI — only needed for manual migration management. The bot runs migrations automatically on startup.
 

@@ -152,7 +152,12 @@ func (s *PostgresStore) SaveGameweekSnapshot(ctx context.Context, standings []Ga
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() {
+		if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
+			// Log but don't override the original error — rollback after
+			// commit returns pgx.ErrTxClosed, which is expected.
+		}
+	}()
 
 	for _, st := range standings {
 		if _, err := tx.Exec(ctx, upsertGameweekStanding,

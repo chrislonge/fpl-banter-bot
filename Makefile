@@ -3,7 +3,7 @@
 -include .env
 export
 
-.PHONY: build test test-store lint run db-up db-down db-reset
+.PHONY: build test test-store test-all lint run db-up db-down db-reset
 
 ## Build the bot binary
 build:

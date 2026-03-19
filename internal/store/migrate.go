@@ -3,6 +3,7 @@ package store
 import (
 	"embed"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -47,7 +48,7 @@ var migrationsFS embed.FS
 //
 // The databaseURL parameter should be a standard Postgres connection
 // string (e.g., "postgres://user:pass@host:5432/dbname?sslmode=disable").
-func RunMigrations(databaseURL string) error {
+func RunMigrations(databaseURL string) (err error) {
 	// golang-migrate's pgx5 driver registers itself under the "pgx5"
 	// scheme, not "postgres" or "postgresql". We swap the scheme prefix
 	// so callers can use standard Postgres URLs everywhere.
@@ -65,6 +66,15 @@ func RunMigrations(databaseURL string) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		srcErr, dbErr := m.Close()
+		if srcErr != nil {
+			err = errors.Join(err, fmt.Errorf("close migration source: %w", srcErr))
+		}
+		if dbErr != nil {
+			err = errors.Join(err, fmt.Errorf("close migration db: %w", dbErr))
+		}
+	}()
 
 	// Run all pending migrations. migrate.ErrNoChange means all
 	// migrations are already applied — that's success, not an error.
@@ -78,7 +88,12 @@ func RunMigrations(databaseURL string) error {
 // toPgx5Scheme replaces the "postgres://" or "postgresql://" URL scheme
 // with "pgx5://" so golang-migrate routes to the pgx5 database driver.
 func toPgx5Scheme(databaseURL string) string {
-	s := strings.Replace(databaseURL, "postgresql://", "pgx5://", 1)
-	s = strings.Replace(s, "postgres://", "pgx5://", 1)
-	return s
+	switch {
+	case strings.HasPrefix(databaseURL, "postgresql://"):
+		return "pgx5://" + strings.TrimPrefix(databaseURL, "postgresql://")
+	case strings.HasPrefix(databaseURL, "postgres://"):
+		return "pgx5://" + strings.TrimPrefix(databaseURL, "postgres://")
+	default:
+		return databaseURL
+	}
 }

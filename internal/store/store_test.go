@@ -219,7 +219,10 @@ func TestUpsertAndGetGameweekStanding(t *testing.T) {
 	if err := testStore.UpsertGameweekStanding(ctx, standing); err != nil {
 		t.Fatalf("UpsertGameweekStanding (update): %v", err)
 	}
-	standings, _ = testStore.GetStandings(ctx, 100, 5)
+	standings, err = testStore.GetStandings(ctx, 100, 5)
+	if err != nil {
+		t.Fatalf("GetStandings after update: %v", err)
+	}
 	if standings[0].Rank != 2 {
 		t.Errorf("Rank after upsert = %d, want 2", standings[0].Rank)
 	}
@@ -249,7 +252,10 @@ func TestUpsertChipUsage(t *testing.T) {
 	if err := testStore.UpsertChipUsage(ctx, chip); err != nil {
 		t.Fatalf("UpsertChipUsage (duplicate): %v", err)
 	}
-	chips, _ = testStore.GetChipUsage(ctx, 100, 5)
+	chips, err = testStore.GetChipUsage(ctx, 100, 5)
+	if err != nil {
+		t.Fatalf("GetChipUsage after duplicate: %v", err)
+	}
 	if len(chips) != 1 {
 		t.Errorf("len(chips) after duplicate = %d, want 1", len(chips))
 	}
@@ -289,7 +295,10 @@ func TestUpsertAndGetH2HResult(t *testing.T) {
 	if err := testStore.UpsertH2HResult(ctx, result); err != nil {
 		t.Fatalf("UpsertH2HResult (update): %v", err)
 	}
-	results, _ = testStore.GetH2HResults(ctx, 100, 5)
+	results, err = testStore.GetH2HResults(ctx, 100, 5)
+	if err != nil {
+		t.Fatalf("GetH2HResults after update: %v", err)
+	}
 	if results[0].Manager1Score != 70 {
 		t.Errorf("Manager1Score after upsert = %d, want 70", results[0].Manager1Score)
 	}
@@ -372,11 +381,17 @@ func TestSaveGameweekSnapshotIdempotent(t *testing.T) {
 		t.Fatalf("second SaveGameweekSnapshot: %v", err)
 	}
 
-	gotStandings, _ := testStore.GetStandings(ctx, 100, 5)
+	gotStandings, err := testStore.GetStandings(ctx, 100, 5)
+	if err != nil {
+		t.Fatalf("GetStandings: %v", err)
+	}
 	if len(gotStandings) != 1 {
 		t.Errorf("len(standings) = %d, want 1", len(gotStandings))
 	}
-	gotChips, _ := testStore.GetChipUsage(ctx, 100, 5)
+	gotChips, err := testStore.GetChipUsage(ctx, 100, 5)
+	if err != nil {
+		t.Fatalf("GetChipUsage: %v", err)
+	}
 	if len(gotChips) != 1 {
 		t.Errorf("len(chips) = %d, want 1", len(gotChips))
 	}
@@ -408,6 +423,9 @@ func TestGetStandingsOrdering(t *testing.T) {
 	}
 
 	// Should come back ordered by rank.
+	if len(standings) != 3 {
+		t.Fatalf("len(standings) = %d, want 3", len(standings))
+	}
 	for i, want := range []int{1, 2, 3} {
 		if standings[i].Rank != want {
 			t.Errorf("standings[%d].Rank = %d, want %d", i, standings[i].Rank, want)
@@ -437,7 +455,10 @@ func TestGetLatestEventID(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertGameweekStanding (GW5): %v", err)
 	}
-	eventID, _ = testStore.GetLatestEventID(ctx, 100)
+	eventID, err = testStore.GetLatestEventID(ctx, 100)
+	if err != nil {
+		t.Fatalf("GetLatestEventID after GW5: %v", err)
+	}
 	if eventID != 5 {
 		t.Errorf("GetLatestEventID (after GW5) = %d, want 5", eventID)
 	}
@@ -448,7 +469,10 @@ func TestGetLatestEventID(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertGameweekStanding (GW10): %v", err)
 	}
-	eventID, _ = testStore.GetLatestEventID(ctx, 100)
+	eventID, err = testStore.GetLatestEventID(ctx, 100)
+	if err != nil {
+		t.Fatalf("GetLatestEventID after GW10: %v", err)
+	}
 	if eventID != 10 {
 		t.Errorf("GetLatestEventID (after GW10) = %d, want 10", eventID)
 	}
@@ -512,8 +536,14 @@ func TestMultiLeagueSameManager(t *testing.T) {
 		t.Fatalf("UpsertGameweekStanding (league 200): %v", err)
 	}
 
-	standingsA, _ := testStore.GetStandings(ctx, 100, 1)
-	standingsB, _ := testStore.GetStandings(ctx, 200, 1)
+	standingsA, err := testStore.GetStandings(ctx, 100, 1)
+	if err != nil {
+		t.Fatalf("GetStandings(100): %v", err)
+	}
+	standingsB, err := testStore.GetStandings(ctx, 200, 1)
+	if err != nil {
+		t.Fatalf("GetStandings(200): %v", err)
+	}
 	if len(standingsA) != 1 || standingsA[0].Rank != 1 {
 		t.Errorf("league 100 standings = %+v, want Rank=1", standingsA)
 	}
