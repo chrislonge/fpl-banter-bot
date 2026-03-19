@@ -120,6 +120,21 @@ The bot starts the polling state machine, which adaptively polls the FPL API bas
 
 **Graceful shutdown:** Press `Ctrl+C` or send `SIGTERM` to trigger a clean shutdown. The bot finishes its current poll cycle, closes database connections, and exits.
 
+### 4. Backfill historical gameweeks (optional)
+
+If the bot was deployed mid-season, it only has data from the gameweek it first ran. The backfill command populates all previous finished gameweeks:
+
+```bash
+make backfill
+# or: go run cmd/backfill/main.go
+```
+
+This is a one-time operation. It detects which gameweeks are missing from the database and fills the gaps. Running it again is safe (idempotent) — it skips gameweeks that already exist. Press `Ctrl+C` to cancel mid-backfill; progress is saved per-gameweek.
+
+> **Important limitation:** The FPL API does not serve historical standings snapshots — `GetAllH2HStandings()` always returns the *current* cumulative league table. This means backfilled standings (ranks, H2H points) reflect today's values, not what the table looked like at each gameweek. Chip usage IS fully historical (sourced from `GetManagerHistory()`).
+>
+> The bot tags every snapshot with its provenance in the `gameweek_snapshot_meta` table (`source=backfill, standings_fidelity=synthetic`), so the stats engine knows to skip rank-change and streak alerts for backfilled gameweeks while still using the accurate chip data. Snapshots captured during normal live polling are tagged `source=live, standings_fidelity=historical` and are fully trustworthy.
+
 ## Configuration
 
 All configuration is via environment variables. See [`.env.example`](.env.example) for the full list.
@@ -140,7 +155,8 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 ## Project structure
 
 ```
-cmd/bot/             Entrypoint — wires everything together
+cmd/bot/             Main bot entrypoint — wires everything together
+cmd/backfill/        Backfill CLI — populates historical gameweeks
 internal/config/     Environment variable loading + validation
 internal/fpl/        FPL HTTP client + API response types
 internal/poller/     Gameweek lifecycle state machine (Idle → Live → Processing)
@@ -175,6 +191,7 @@ make test-store   # store integration tests against real Postgres
 make test-all     # all tests including store integration
 make lint         # golangci-lint run
 make run          # go run cmd/bot/main.go
+make backfill     # go run cmd/backfill/main.go (one-time historical data)
 make db-up        # docker compose up -d db
 make db-down      # docker compose down
 make db-reset     # destroy + recreate DB (needed after schema changes)
@@ -245,7 +262,7 @@ migrate -path internal/store/migrations -database "$DATABASE_URL" down 1
 ## Known limitations
 
 - **H2H leagues only** — classic league support is planned but not yet implemented. The bot fails fast on startup if `FPL_LEAGUE_TYPE` is not `h2h`.
-- **No historical backfill** — if the bot is offline for multiple gameweeks, it only captures data for the current gameweek when it comes back. Missed intermediate gameweeks are lost. A backfill command is planned (milestone 4b).
+- **Backfill standings are synthetic** — see the [backfill section](#4-backfill-historical-gameweeks-optional) for details on this FPL API limitation.
 - **No alerts yet** — the poller collects and persists data, but the stats engine (which generates banter-worthy alerts) and Telegram notifier are not yet implemented.
 
 ## License

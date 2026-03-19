@@ -105,6 +105,10 @@ See `.env.example` for the full list. Copy to `.env` for local values (gitignore
 - `FPL_LEAGUE_ID` — FPL league ID
 - `FPL_LEAGUE_TYPE` — `h2h` or `classic`
 
+## After Implementing a Plan
+
+Update `LEARNING_JOURNAL.md` at the project root with any new Go patterns, idioms, or architectural concepts encountered during the implementation. Add a section for the phase, with pattern names, code examples from this project, explanations of why they matter, and analogies to Swift/Kotlin where helpful. Concepts that may be new to the user (like "data provenance") should be explained from first principles.
+
 ## Contributing
 
 - The `Notifier` interface in `pkg/notify/` is the extension point for new chat platforms

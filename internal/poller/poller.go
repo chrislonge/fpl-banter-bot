@@ -128,6 +128,11 @@ type Poller struct {
 	// we've successfully finalized (data persisted AND callback succeeded).
 	// Initialized from the database on startup via GetLatestEventID.
 	lastProcessedEvent int
+
+	// rateLimitDelay is the delay between FPL API calls during backfill.
+	// Defaults to 500ms. Exposed as a field (not a constant) so unit tests
+	// can set it to 0 to avoid wall-clock waits.
+	rateLimitDelay time.Duration
 }
 
 // New creates a Poller with the given dependencies.
@@ -157,12 +162,13 @@ func New(fplClient FPLClient, s store.Store, cfg Config, onFinalized OnGameweekF
 	}
 
 	return &Poller{
-		fpl:         fplClient,
-		store:       s,
-		onFinalized: onFinalized,
-		cfg:         cfg,
-		logger:      slog.Default(),
-		state:       StateIdle,
+		fpl:            fplClient,
+		store:          s,
+		onFinalized:    onFinalized,
+		cfg:            cfg,
+		logger:         slog.Default(),
+		state:          StateIdle,
+		rateLimitDelay: 500 * time.Millisecond,
 	}, nil
 }
 
@@ -453,10 +459,16 @@ func (p *Poller) finalize(ctx context.Context, eventID int) error {
 	// Step 5: Map standings to store types.
 	standings := mapStandings(leagueID, eventID, standingsResp.Standings.Results)
 
-	// Step 6: Save the snapshot atomically.
+	// Step 6: Save the snapshot atomically (standings + chips + meta in one tx).
 	// Pass nil for H2H results — the /leagues-h2h/{id}/matches/ endpoint
 	// returned 404 during development. The store handles nil slices fine.
-	if err := p.store.SaveGameweekSnapshot(ctx, standings, allChips, nil); err != nil {
+	meta := store.SnapshotMeta{
+		LeagueID:          leagueID,
+		EventID:           eventID,
+		Source:            "live",
+		StandingsFidelity: "historical",
+	}
+	if err := p.store.SaveGameweekSnapshot(ctx, standings, allChips, nil, meta); err != nil {
 		return fmt.Errorf("saving snapshot: %w", err)
 	}
 

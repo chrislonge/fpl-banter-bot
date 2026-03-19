@@ -3,7 +3,7 @@
 -include .env
 export
 
-.PHONY: build test test-store test-all lint run db-up db-down db-reset
+.PHONY: build test test-store test-all lint run backfill db-up db-down db-reset
 
 ## Build the bot binary
 build:
@@ -28,6 +28,10 @@ lint:
 ## Run the bot
 run:
 	go run cmd/bot/main.go
+
+## Backfill historical gameweeks (one-time operation)
+backfill:
+	go run cmd/backfill/main.go
 
 ## Start the database
 db-up:

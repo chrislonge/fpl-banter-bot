@@ -70,6 +70,14 @@ const upsertH2HResult = `
 		manager_2_score = EXCLUDED.manager_2_score
 `
 
+const upsertSnapshotMeta = `
+	INSERT INTO gameweek_snapshot_meta (league_id, event_id, source, standings_fidelity)
+	VALUES ($1, $2, $3, $4)
+	ON CONFLICT (league_id, event_id) DO UPDATE SET
+		source             = EXCLUDED.source,
+		standings_fidelity = EXCLUDED.standings_fidelity
+`
+
 // ---------------------------------------------------------------------------
 // Read queries
 // ---------------------------------------------------------------------------
@@ -106,6 +114,19 @@ const getH2HResults = `
 	FROM h2h_results
 	WHERE league_id = $1 AND event_id = $2
 	ORDER BY manager_1_id, manager_2_id
+`
+
+const getStoredEventIDs = `
+	SELECT DISTINCT event_id
+	FROM gameweek_standings
+	WHERE league_id = $1
+	ORDER BY event_id
+`
+
+const getSnapshotMeta = `
+	SELECT league_id, event_id, source, standings_fidelity, created_at
+	FROM gameweek_snapshot_meta
+	WHERE league_id = $1 AND event_id = $2
 `
 
 // getLatestEventID returns the highest gameweek number stored for a league.

@@ -91,6 +91,12 @@ type fakeStore struct {
 	lastStandings    []store.GameweekStanding
 	lastChips        []store.ChipUsage
 	snapshotErr      error
+
+	// Backfill-related fields
+	storedEventIDs   []int
+	storedEventIDErr error
+	savedEventIDs    []int
+	snapshotMetas    []store.SnapshotMeta
 }
 
 func (f *fakeStore) GetLatestEventID(_ context.Context, _ int64) (int, error) {
@@ -107,11 +113,28 @@ func (f *fakeStore) UpsertManager(_ context.Context, manager store.Manager) erro
 	return nil
 }
 
-func (f *fakeStore) SaveGameweekSnapshot(_ context.Context, standings []store.GameweekStanding, chips []store.ChipUsage, _ []store.H2HResult) error {
+func (f *fakeStore) SaveGameweekSnapshot(_ context.Context, standings []store.GameweekStanding, chips []store.ChipUsage, _ []store.H2HResult, meta store.SnapshotMeta) error {
 	f.snapshotCalls++
 	f.lastStandings = standings
 	f.lastChips = chips
+	f.snapshotMetas = append(f.snapshotMetas, meta)
+	if len(standings) > 0 {
+		f.savedEventIDs = append(f.savedEventIDs, standings[0].EventID)
+	}
 	return f.snapshotErr
+}
+
+func (f *fakeStore) GetStoredEventIDs(_ context.Context, _ int64) ([]int, error) {
+	return f.storedEventIDs, f.storedEventIDErr
+}
+
+func (f *fakeStore) UpsertSnapshotMeta(_ context.Context, meta store.SnapshotMeta) error {
+	f.snapshotMetas = append(f.snapshotMetas, meta)
+	return nil
+}
+
+func (f *fakeStore) GetSnapshotMeta(_ context.Context, _ int64, _ int) (store.SnapshotMeta, error) {
+	panic("not implemented")
 }
 
 // Methods the poller doesn't call — panic to catch unexpected usage.
@@ -167,10 +190,13 @@ func defaultConfig() Config {
 
 // newTestPoller creates a Poller wired with the given fakes.
 // It sets bootstrap to non-nil so tick() doesn't always re-fetch during idle.
+// It also zeroes out the rate limit delay so tests don't wait on wall-clock time.
 func newTestPoller(fc *fakeFPLClient, fs *fakeStore, onFinalized OnGameweekFinalized) *Poller {
 	p, _ := New(fc, fs, defaultConfig(), onFinalized)
 	// Pre-set bootstrap so we don't re-fetch on every idle tick in tests.
 	p.bootstrap = &fc.bootstrap
+	// Zero out rate limit so backfill tests run instantly.
+	p.rateLimitDelay = 0
 	return p
 }
 
