@@ -3,6 +3,7 @@ package poller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -187,6 +188,27 @@ func TestNew_RejectsClassicLeague(t *testing.T) {
 	}
 }
 
+func TestNew_RejectsZeroIntervals(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Config)
+	}{
+		{"zero idle interval", func(c *Config) { c.IdleInterval = 0 }},
+		{"negative live interval", func(c *Config) { c.LiveInterval = -1 * time.Second }},
+		{"zero processing interval", func(c *Config) { c.ProcessingInterval = 0 }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := defaultConfig()
+			tt.mutate(&cfg)
+			_, err := New(&fakeFPLClient{}, &fakeStore{}, cfg, nil)
+			if err == nil {
+				t.Fatal("expected error for invalid interval, got nil")
+			}
+		})
+	}
+}
+
 func TestNew_AcceptsH2H(t *testing.T) {
 	p, err := New(&fakeFPLClient{}, &fakeStore{}, defaultConfig(), nil)
 	if err != nil {
@@ -216,6 +238,7 @@ func TestTick(t *testing.T) {
 	tests := []struct {
 		name           string
 		setup          func(fc *fakeFPLClient, fs *fakeStore, p *Poller)
+		onFinalized    func(context.Context, int) error // if non-nil, used as the callback
 		wantState      State
 		wantFinalized  bool // whether finalization should have occurred
 		wantErrSubstr  string
@@ -416,6 +439,9 @@ func TestTick(t *testing.T) {
 			// wantFinalized is true because the snapshot was saved — the test
 			// for guard non-advancement is in TestTick_CallbackFailureDoesNotAdvanceGuard.
 			name: "callback failure aborts finalization",
+			onFinalized: func(_ context.Context, _ int) error {
+				return errors.New("stats engine crashed")
+			},
 			setup: func(fc *fakeFPLClient, _ *fakeStore, _ *Poller) {
 				fc.bootstrap = fpl.BootstrapResponse{
 					Events: []fpl.Event{
@@ -456,15 +482,7 @@ func TestTick(t *testing.T) {
 			}
 			fs := &fakeStore{}
 
-			// For the "callback failure" test case, wire a failing callback.
-			var onFinalized OnGameweekFinalized
-			if tt.name == "callback failure aborts finalization" {
-				onFinalized = func(_ context.Context, _ int) error {
-					return errors.New("stats engine crashed")
-				}
-			}
-
-			p := newTestPoller(fc, fs, onFinalized)
+			p := newTestPoller(fc, fs, tt.onFinalized)
 			tt.setup(fc, fs, p)
 
 			// Re-set bootstrap on the poller after setup modifies fc.bootstrap,
@@ -480,7 +498,7 @@ func TestTick(t *testing.T) {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tt.wantErrSubstr)
 				}
-				if !containsSubstring(err.Error(), tt.wantErrSubstr) {
+				if !strings.Contains(err.Error(), tt.wantErrSubstr) {
 					t.Fatalf("expected error containing %q, got %q", tt.wantErrSubstr, err.Error())
 				}
 			} else if err != nil {
@@ -921,19 +939,3 @@ func TestMapChipUsages_NilInput(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-func containsSubstring(s, substr string) bool {
-	return len(s) >= len(substr) && searchSubstring(s, substr)
-}
-
-func searchSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

@@ -146,6 +146,15 @@ func New(fplClient FPLClient, s store.Store, cfg Config, onFinalized OnGameweekF
 	if cfg.LeagueType != "h2h" {
 		return nil, fmt.Errorf("unsupported league type %q: only \"h2h\" is supported", cfg.LeagueType)
 	}
+	if cfg.IdleInterval <= 0 {
+		return nil, fmt.Errorf("IdleInterval must be positive, got %v", cfg.IdleInterval)
+	}
+	if cfg.LiveInterval <= 0 {
+		return nil, fmt.Errorf("LiveInterval must be positive, got %v", cfg.LiveInterval)
+	}
+	if cfg.ProcessingInterval <= 0 {
+		return nil, fmt.Errorf("ProcessingInterval must be positive, got %v", cfg.ProcessingInterval)
+	}
 
 	return &Poller{
 		fpl:         fplClient,
@@ -286,11 +295,12 @@ func (p *Poller) tick(ctx context.Context) error {
 	}
 
 	// Step 8: Check finalization conditions.
-	if !allBonusAdded(status, event.ID) || status.Leagues != "Updated" {
+	bonusReady := allBonusAdded(status, event.ID)
+	if !bonusReady || status.Leagues != "Updated" {
 		p.transition(StateProcessing)
 		p.logger.Info("waiting for finalization",
 			"event_id", event.ID,
-			"bonus_added", allBonusAdded(status, event.ID),
+			"bonus_added", bonusReady,
 			"leagues", status.Leagues,
 		)
 		return nil
