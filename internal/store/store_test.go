@@ -325,7 +325,11 @@ func TestSaveGameweekSnapshot(t *testing.T) {
 		{LeagueID: 100, EventID: 5, Manager1ID: 1001, Manager1Score: 65, Manager2ID: 1002, Manager2Score: 48},
 	}
 
-	if err := testStore.SaveGameweekSnapshot(ctx, standings, chips, results); err != nil {
+	meta := store.SnapshotMeta{
+		LeagueID: 100, EventID: 5,
+		Source: "live", StandingsFidelity: "historical",
+	}
+	if err := testStore.SaveGameweekSnapshot(ctx, standings, chips, results, meta); err != nil {
 		t.Fatalf("SaveGameweekSnapshot: %v", err)
 	}
 
@@ -353,6 +357,15 @@ func TestSaveGameweekSnapshot(t *testing.T) {
 	if len(gotResults) != 1 {
 		t.Errorf("len(results) = %d, want 1", len(gotResults))
 	}
+
+	// Verify metadata was written atomically with the snapshot.
+	gotMeta, err := testStore.GetSnapshotMeta(ctx, 100, 5)
+	if err != nil {
+		t.Fatalf("GetSnapshotMeta: %v", err)
+	}
+	if gotMeta.Source != "live" || gotMeta.StandingsFidelity != "historical" {
+		t.Errorf("meta source=%q fidelity=%q, want live/historical", gotMeta.Source, gotMeta.StandingsFidelity)
+	}
 }
 
 func TestSaveGameweekSnapshotIdempotent(t *testing.T) {
@@ -373,11 +386,16 @@ func TestSaveGameweekSnapshotIdempotent(t *testing.T) {
 		{LeagueID: 100, EventID: 5, Manager1ID: 1001, Manager1Score: 65, Manager2ID: 1002, Manager2Score: 48},
 	}
 
+	meta := store.SnapshotMeta{
+		LeagueID: 100, EventID: 5,
+		Source: "live", StandingsFidelity: "historical",
+	}
+
 	// Save twice — should succeed both times with no duplicates.
-	if err := testStore.SaveGameweekSnapshot(ctx, standings, chips, results); err != nil {
+	if err := testStore.SaveGameweekSnapshot(ctx, standings, chips, results, meta); err != nil {
 		t.Fatalf("first SaveGameweekSnapshot: %v", err)
 	}
-	if err := testStore.SaveGameweekSnapshot(ctx, standings, chips, results); err != nil {
+	if err := testStore.SaveGameweekSnapshot(ctx, standings, chips, results, meta); err != nil {
 		t.Fatalf("second SaveGameweekSnapshot: %v", err)
 	}
 
@@ -675,7 +693,11 @@ func TestSnapshotAtomicity(t *testing.T) {
 		{LeagueID: 100, EventID: 5, ManagerID: 9999, Rank: 2, Points: 24, TotalScore: 310}, // FK violation
 	}
 
-	err := testStore.SaveGameweekSnapshot(ctx, standings, nil, nil)
+	meta := store.SnapshotMeta{
+		LeagueID: 100, EventID: 5,
+		Source: "live", StandingsFidelity: "historical",
+	}
+	err := testStore.SaveGameweekSnapshot(ctx, standings, nil, nil, meta)
 	if err == nil {
 		t.Fatal("SaveGameweekSnapshot should have failed with FK violation")
 	}
@@ -688,5 +710,11 @@ func TestSnapshotAtomicity(t *testing.T) {
 	}
 	if len(gotStandings) != 0 {
 		t.Errorf("len(standings) = %d after failed snapshot, want 0 (transaction should have rolled back)", len(gotStandings))
+	}
+
+	// Metadata should also NOT have been persisted — it's in the same tx.
+	_, err = testStore.GetSnapshotMeta(ctx, 100, 5)
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("GetSnapshotMeta after failed snapshot: got err=%v, want store.ErrNotFound (meta should have been rolled back)", err)
 	}
 }

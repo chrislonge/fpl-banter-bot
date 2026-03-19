@@ -3,6 +3,7 @@ package poller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,6 +50,7 @@ func defaultStandings() fpl.H2HStandingsResponse {
 func TestBackfill(t *testing.T) {
 	tests := []struct {
 		name              string
+		cancelCtx         bool     // if true, cancel context before calling Backfill
 		setup             func(fc *fakeFPLClient, fs *fakeStore)
 		wantSnapshots     int      // expected number of SaveGameweekSnapshot calls
 		wantSavedEventIDs []int    // expected event IDs saved (in order)
@@ -193,7 +195,8 @@ func TestBackfill(t *testing.T) {
 			wantMetaFidelity:  "synthetic",
 		},
 		{
-			name: "context cancellation",
+			name:      "context cancellation",
+			cancelCtx: true,
 			setup: func(fc *fakeFPLClient, fs *fakeStore) {
 				fc.bootstrap = fpl.BootstrapResponse{
 					Events: makeEvents([]int{1, 2, 3}, map[int]bool{1: true, 2: true, 3: true}),
@@ -278,7 +281,7 @@ func TestBackfill(t *testing.T) {
 
 			// For context cancellation test, cancel immediately.
 			ctx := context.Background()
-			if tt.name == "context cancellation" {
+			if tt.cancelCtx {
 				var cancel context.CancelFunc
 				ctx, cancel = context.WithCancel(ctx)
 				cancel() // Cancel immediately.
@@ -292,7 +295,7 @@ func TestBackfill(t *testing.T) {
 					t.Fatal("expected error, got nil")
 				}
 				if tt.wantErrMsg != "" {
-					if !contains(err.Error(), tt.wantErrMsg) {
+					if !strings.Contains(err.Error(), tt.wantErrMsg) {
 						t.Fatalf("expected error containing %q, got %q", tt.wantErrMsg, err.Error())
 					}
 				}
@@ -451,16 +454,3 @@ func TestRateLimitDelay(t *testing.T) {
 	})
 }
 
-// contains is a simple substring check for error messages.
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchSubstring(s, substr)
-}
-
-func searchSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

@@ -113,10 +113,11 @@ func (f *fakeStore) UpsertManager(_ context.Context, manager store.Manager) erro
 	return nil
 }
 
-func (f *fakeStore) SaveGameweekSnapshot(_ context.Context, standings []store.GameweekStanding, chips []store.ChipUsage, _ []store.H2HResult) error {
+func (f *fakeStore) SaveGameweekSnapshot(_ context.Context, standings []store.GameweekStanding, chips []store.ChipUsage, _ []store.H2HResult, meta store.SnapshotMeta) error {
 	f.snapshotCalls++
 	f.lastStandings = standings
 	f.lastChips = chips
+	f.snapshotMetas = append(f.snapshotMetas, meta)
 	if len(standings) > 0 {
 		f.savedEventIDs = append(f.savedEventIDs, standings[0].EventID)
 	}

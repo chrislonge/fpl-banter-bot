@@ -152,20 +152,15 @@ func (p *Poller) Backfill(ctx context.Context) error {
 			allChips = append(allChips, chips...)
 		}
 
-		// Persist the snapshot atomically.
-		if err := p.store.SaveGameweekSnapshot(ctx, standings, allChips, nil); err != nil {
-			return fmt.Errorf("saving snapshot for GW %d: %w", eventID, err)
-		}
-
-		// Tag as backfill with synthetic standings fidelity.
+		// Persist the snapshot atomically (standings + chips + meta in one tx).
 		meta := store.SnapshotMeta{
 			LeagueID:          leagueID,
 			EventID:           eventID,
 			Source:            "backfill",
 			StandingsFidelity: "synthetic",
 		}
-		if err := p.store.UpsertSnapshotMeta(ctx, meta); err != nil {
-			return fmt.Errorf("upserting snapshot meta for GW %d: %w", eventID, err)
+		if err := p.store.SaveGameweekSnapshot(ctx, standings, allChips, nil, meta); err != nil {
+			return fmt.Errorf("saving snapshot for GW %d: %w", eventID, err)
 		}
 
 		p.logger.Info("backfilled gameweek",

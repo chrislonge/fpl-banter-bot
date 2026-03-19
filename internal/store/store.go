@@ -53,7 +53,7 @@ type Store interface {
 	//
 	// Prerequisites: the league and all referenced managers must already
 	// exist (upserted via UpsertLeague/UpsertManager before calling this).
-	SaveGameweekSnapshot(ctx context.Context, standings []GameweekStanding, chips []ChipUsage, results []H2HResult) error
+	SaveGameweekSnapshot(ctx context.Context, standings []GameweekStanding, chips []ChipUsage, results []H2HResult, meta SnapshotMeta) error
 
 	// --- Reads (the stats engine calls these to diff gameweeks) ---
 
@@ -150,7 +150,7 @@ func (s *PostgresStore) UpsertH2HResult(ctx context.Context, result H2HResult) e
 // deferred Rollback is a no-op (rolling back an already-committed
 // transaction does nothing). This pattern guarantees cleanup regardless
 // of which code path executes.
-func (s *PostgresStore) SaveGameweekSnapshot(ctx context.Context, standings []GameweekStanding, chips []ChipUsage, results []H2HResult) error {
+func (s *PostgresStore) SaveGameweekSnapshot(ctx context.Context, standings []GameweekStanding, chips []ChipUsage, results []H2HResult, meta SnapshotMeta) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -185,6 +185,12 @@ func (s *PostgresStore) SaveGameweekSnapshot(ctx context.Context, standings []Ga
 		); err != nil {
 			return fmt.Errorf("upsert h2h result (%d vs %d): %w", r.Manager1ID, r.Manager2ID, err)
 		}
+	}
+
+	if _, err := tx.Exec(ctx, upsertSnapshotMeta,
+		meta.LeagueID, meta.EventID, meta.Source, meta.StandingsFidelity,
+	); err != nil {
+		return fmt.Errorf("upsert snapshot meta: %w", err)
 	}
 
 	return tx.Commit(ctx)

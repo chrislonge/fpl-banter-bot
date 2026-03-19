@@ -51,7 +51,7 @@ CREATE TABLE h2h_results (
 );
 
 CREATE TABLE gameweek_snapshot_meta (
-    league_id          BIGINT NOT NULL,
+    league_id          BIGINT NOT NULL REFERENCES leagues(id),
     event_id           INT NOT NULL,
     source             TEXT NOT NULL,
     standings_fidelity TEXT NOT NULL,

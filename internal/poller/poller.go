@@ -459,24 +459,17 @@ func (p *Poller) finalize(ctx context.Context, eventID int) error {
 	// Step 5: Map standings to store types.
 	standings := mapStandings(leagueID, eventID, standingsResp.Standings.Results)
 
-	// Step 6: Save the snapshot atomically.
+	// Step 6: Save the snapshot atomically (standings + chips + meta in one tx).
 	// Pass nil for H2H results — the /leagues-h2h/{id}/matches/ endpoint
 	// returned 404 during development. The store handles nil slices fine.
-	if err := p.store.SaveGameweekSnapshot(ctx, standings, allChips, nil); err != nil {
-		return fmt.Errorf("saving snapshot: %w", err)
-	}
-
-	// Tag this snapshot as live data with historical fidelity.
-	// The stats engine (Phase 1.5) can use this to distinguish live
-	// snapshots from backfilled ones where standings are synthetic.
 	meta := store.SnapshotMeta{
 		LeagueID:          leagueID,
 		EventID:           eventID,
 		Source:            "live",
 		StandingsFidelity: "historical",
 	}
-	if err := p.store.UpsertSnapshotMeta(ctx, meta); err != nil {
-		return fmt.Errorf("upserting snapshot meta: %w", err)
+	if err := p.store.SaveGameweekSnapshot(ctx, standings, allChips, nil, meta); err != nil {
+		return fmt.Errorf("saving snapshot: %w", err)
 	}
 
 	p.logger.Info("snapshot saved",
