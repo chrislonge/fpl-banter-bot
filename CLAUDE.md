@@ -72,30 +72,36 @@ No authentication required. CORS restricted (server-side only).
 
 ```bash
 # Run locally
-docker compose up -d db
-go run cmd/bot/main.go
+make db-up          # or: docker compose up -d db
+make run            # or: go run cmd/bot/main.go
 
 # Test
-go test ./...
-go test ./internal/fpl/ -v
+make test           # or: go test ./...
+make test-store     # store integration tests (requires Postgres)
+make test-all       # all tests including store integration
 
 # Lint
-golangci-lint run
+make lint           # or: golangci-lint run
 
 # Build Docker image (ARM for Pi)
 docker build --platform linux/arm64 -t fpl-banter-bot .
 
-# Database migrations
-migrate -path internal/store/migrations -database "$DATABASE_URL" up
+# Database management
+make db-up          # start Postgres
+make db-down        # stop Postgres (data preserved)
+make db-reset       # destroy + recreate (needed after schema changes)
 ```
+
+Migrations run automatically on bot startup via embedded SQL files. The `golang-migrate` CLI is optional (manual rollbacks only).
 
 ## Environment Variables
 
-See `.env.example` for the full list. Key ones:
+See `.env.example` for the full list. Copy to `.env` for local values (gitignored). The Makefile loads `.env` automatically.
 
 - `TELEGRAM_BOT_TOKEN` — From @BotFather
 - `TELEGRAM_CHAT_ID` — Target group chat ID
 - `DATABASE_URL` — Postgres connection string
+- `STORE_TEST_DATABASE_URL` — Test database connection string (for `make test-store`)
 - `FPL_LEAGUE_ID` — FPL league ID
 - `FPL_LEAGUE_TYPE` — `h2h` or `classic`
 

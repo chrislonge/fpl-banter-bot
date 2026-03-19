@@ -12,6 +12,7 @@ import (
 
 	"github.com/chrislonge/fpl-banter-bot/internal/config"
 	"github.com/chrislonge/fpl-banter-bot/internal/fpl"
+	"github.com/chrislonge/fpl-banter-bot/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -82,9 +83,20 @@ func main() {
 	}
 	slog.Info("FPL API reachable", "leagues_status", status.Leagues)
 
-	// TODO: Run migrations, initialise store, poller, stats engine.
-	// For now, we prove the scaffolding + FPL client work end-to-end.
-	_ = pool // Will be used by the store in Phase 1.3.
+	// Run database migrations. The SQL files are embedded in the binary
+	// via //go:embed, so there are no external files to deploy.
+	if err := store.RunMigrations(cfg.DatabaseURL); err != nil {
+		slog.Error("failed to run database migrations", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("database migrations complete")
+
+	// Create the store — the persistence layer between the FPL client
+	// and the future stats engine/poller.
+	appStore := store.New(pool)
+
+	// TODO: Wire poller, stats engine, and notifier.
+	_ = appStore // Will be used by the poller in Phase 1.4.
 	slog.Info("startup complete — bot ready for next milestone")
 }
 
