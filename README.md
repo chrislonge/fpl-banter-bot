@@ -14,6 +14,54 @@ The bot watches your H2H mini-league via the FPL API and automatically detects i
 
 No manual checking required. Alerts are posted to your group chat automatically.
 
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph External
+        FPL["FPL API\n(fantasy.premierleague.com)"]
+        TG["Telegram Bot API"]
+    end
+
+    subgraph "fpl-banter-bot"
+        direction TB
+        MAIN["cmd/bot/main.go\nEntrypoint"]
+        CONFIG["config\nEnv vars"]
+        CLIENT["fpl.Client\nHTTP client"]
+        STORE["store.Store\nPostgres persistence"]
+        POLLER["poller\nGameweek state machine"]
+        STATS["stats.Engine\nDiff + alert detection"]
+        NOTIFY["notify.Notifier\nChat platform interface"]
+    end
+
+    subgraph Infrastructure
+        PG[("PostgreSQL")]
+    end
+
+    MAIN --> CONFIG
+    MAIN --> CLIENT
+    MAIN --> STORE
+    MAIN --> POLLER
+    POLLER -- "polls" --> CLIENT
+    CLIENT -- "HTTP" --> FPL
+    POLLER -- "snapshots" --> STORE
+    STORE -- "pgx" --> PG
+    POLLER -- "on finalize" --> STATS
+    STATS -- "reads prev GW" --> STORE
+    STATS -- "alerts" --> NOTIFY
+    NOTIFY -- "HTTP" --> TG
+
+    style CONFIG fill:#2d6a2d,stroke:#4a4,color:#fff
+    style CLIENT fill:#2d6a2d,stroke:#4a4,color:#fff
+    style STORE fill:#2d6a2d,stroke:#4a4,color:#fff
+    style MAIN fill:#2d6a2d,stroke:#4a4,color:#fff
+    style POLLER fill:#8b6914,stroke:#c90,color:#fff
+    style STATS fill:#8b6914,stroke:#c90,color:#fff
+    style NOTIFY fill:#8b6914,stroke:#c90,color:#fff
+```
+
+> **Legend:** Green = completed, Amber = planned
+
 ## Tech stack
 
 - **Go** — single binary, ~15MB Docker image
