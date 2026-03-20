@@ -128,7 +128,9 @@ The bot supports two operating modes, controlled by whether Telegram credentials
 | Mode | Telegram vars | Behavior |
 |------|---------------|----------|
 | **Data collection only** | Omitted | Polls the FPL API, persists standings and chip data to Postgres. No notifications sent. |
-| **Full** | Both set | Polls, persists, and sends banter-worthy alerts to the configured chat. |
+| **Full** | Both set | Polls and persists data, plus sends banter-worthy alerts to the configured chat when the notification pipeline is enabled. |
+
+> **Current status:** The notification pipeline (stats engine → Notifier) is not yet wired. Both modes currently collect and persist data only. Setting Telegram credentials validates them at startup so the bot is ready when notifications are enabled in a future release.
 
 Data-collection-only mode is useful for building up historical data before enabling notifications, or for running the bot purely as a data pipeline. Setting only one of `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` is treated as a misconfiguration and the bot will refuse to start.
 

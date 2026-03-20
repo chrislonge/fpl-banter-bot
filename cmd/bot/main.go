@@ -40,7 +40,7 @@ func main() {
 	)
 
 	if cfg.TelegramConfigured {
-		slog.Info("notifications enabled", "platform", "telegram")
+		slog.Info("telegram credentials configured", "platform", "telegram")
 	} else {
 		slog.Info("running in data-collection-only mode (no notification credentials configured)")
 	}
