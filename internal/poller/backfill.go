@@ -28,9 +28,9 @@ import (
 // KEY LIMITATION: The FPL API's standings endpoint returns current
 // cumulative values, not historical point-in-time snapshots. Backfilled
 // standings will show GW30 ranks/points for all gameweeks. Chip usage
-// IS fully historical (from GetManagerHistory). The gameweek_snapshot_meta
-// table tags backfilled snapshots as "synthetic" so the stats engine
-// knows not to trust rank diffs from these gameweeks.
+// and H2H match results ARE historical. The gameweek_snapshot_meta table
+// tags backfilled snapshots as "synthetic" so the stats engine knows not
+// to trust rank diffs from these gameweeks.
 //
 // API OPTIMIZATION: We fetch standings once and each manager's history
 // once, then iterate over missing gameweeks. For a 14-manager league,
@@ -152,14 +152,24 @@ func (p *Poller) Backfill(ctx context.Context) error {
 			allChips = append(allChips, chips...)
 		}
 
-		// Persist the snapshot atomically (standings + chips + meta in one tx).
+		// Fetch and map the event's actual H2H fixtures.
+		if err := rateLimitDelay(ctx, p.rateLimitDelay); err != nil {
+			return err
+		}
+		matchesResp, err := p.fpl.GetAllH2HMatches(ctx, p.cfg.LeagueID, eventID)
+		if err != nil {
+			return fmt.Errorf("fetching h2h matches for GW %d: %w", eventID, err)
+		}
+		results := mapH2HResults(leagueID, matchesResp.Results)
+
+		// Persist the snapshot atomically (standings + chips + results + meta).
 		meta := store.SnapshotMeta{
 			LeagueID:          leagueID,
 			EventID:           eventID,
 			Source:            "backfill",
 			StandingsFidelity: "synthetic",
 		}
-		if err := p.store.SaveGameweekSnapshot(ctx, standings, allChips, nil, meta); err != nil {
+		if err := p.store.SaveGameweekSnapshot(ctx, standings, allChips, results, meta); err != nil {
 			return fmt.Errorf("saving snapshot for GW %d: %w", eventID, err)
 		}
 

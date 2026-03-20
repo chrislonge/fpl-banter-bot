@@ -48,6 +48,9 @@ type Client struct {
 // if the upstream API misbehaves and never returns has_next=false.
 const maxH2HStandingsPages = 1000
 
+// maxH2HMatchesPages is the same defensive guard for the H2H matches API.
+const maxH2HMatchesPages = 1000
+
 // NewClient creates a new FPL API client.
 //
 // baseURL is the API root (e.g., "https://fantasy.premierleague.com/api").
@@ -288,6 +291,46 @@ func (c *Client) GetAllH2HStandings(ctx context.Context, leagueID int) (H2HStand
 	return all, nil
 }
 
+// GetH2HMatches fetches a single page of head-to-head match results for one
+// league and one event. Pages are 1-indexed.
+func (c *Client) GetH2HMatches(ctx context.Context, leagueID int, page int, eventID int) (H2HMatchesResponse, error) {
+	var resp H2HMatchesResponse
+	path := fmt.Sprintf("leagues-h2h-matches/league/%d/?page=%d&event=%d", leagueID, page, eventID)
+	if err := c.do(ctx, path, &resp); err != nil {
+		return H2HMatchesResponse{}, err
+	}
+	return resp, nil
+}
+
+// GetAllH2HMatches fetches all match-result pages for a single league and
+// event, following the has_next pagination flag until all results are merged.
+func (c *Client) GetAllH2HMatches(ctx context.Context, leagueID int, eventID int) (H2HMatchesResponse, error) {
+	var all H2HMatchesResponse
+	page := 1
+
+	for {
+		resp, err := c.GetH2HMatches(ctx, leagueID, page, eventID)
+		if err != nil {
+			return H2HMatchesResponse{}, fmt.Errorf("page %d: %w", page, err)
+		}
+
+		all.Results = append(all.Results, resp.Results...)
+
+		if !resp.HasNext {
+			break
+		}
+
+		page++
+		if page > maxH2HMatchesPages {
+			return H2HMatchesResponse{}, fmt.Errorf("reached maximum H2H matches pages (%d) without seeing has_next=false", maxH2HMatchesPages)
+		}
+	}
+
+	all.HasNext = false
+	all.Page = page
+	return all, nil
+}
+
 // GetManagerHistory fetches a manager's gameweek-by-gameweek performance
 // and chip usage for the current season.
 func (c *Client) GetManagerHistory(ctx context.Context, managerID int) (ManagerHistoryResponse, error) {
@@ -309,7 +352,3 @@ func (c *Client) GetManagerPicks(ctx context.Context, managerID int, event int) 
 	}
 	return resp, nil
 }
-
-// NOTE: The /leagues-h2h/{id}/matches/?event={gw} endpoint returned 404
-// during development. H2H match results are derived from standings diffs
-// instead. Revisit in a future phase if per-match data is needed.

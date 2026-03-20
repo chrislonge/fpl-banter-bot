@@ -107,3 +107,40 @@ func mapChipUsages(leagueID int64, eventID int, managerID int64, chips []fpl.Chi
 	}
 	return filtered
 }
+
+// mapH2HResults converts FPL match rows into store H2HResult rows.
+//
+// The store schema enforces canonical ordering (manager_1_id < manager_2_id),
+// so we sort the pair here and swap the scores with them when needed.
+//
+// Bye rows are skipped because the current schema models only true two-manager
+// fixtures. Standard H2H league weeks for the Capital FC league do not use
+// byes, and cup fixtures are out of scope for this phase.
+func mapH2HResults(leagueID int64, matches []fpl.H2HMatch) []store.H2HResult {
+	results := make([]store.H2HResult, 0, len(matches))
+	for _, m := range matches {
+		if m.IsBye || m.Entry1Entry == 0 || m.Entry2Entry == 0 {
+			continue
+		}
+
+		manager1ID := int64(m.Entry1Entry)
+		manager1Score := m.Entry1Points
+		manager2ID := int64(m.Entry2Entry)
+		manager2Score := m.Entry2Points
+
+		if manager1ID > manager2ID {
+			manager1ID, manager2ID = manager2ID, manager1ID
+			manager1Score, manager2Score = manager2Score, manager1Score
+		}
+
+		results = append(results, store.H2HResult{
+			LeagueID:      leagueID,
+			EventID:       m.Event,
+			Manager1ID:    manager1ID,
+			Manager1Score: manager1Score,
+			Manager2ID:    manager2ID,
+			Manager2Score: manager2Score,
+		})
+	}
+	return results
+}

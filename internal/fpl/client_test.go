@@ -508,6 +508,169 @@ func TestGetAllH2HStandings(t *testing.T) {
 // TestGetManagerHistory
 // ---------------------------------------------------------------------------
 
+func TestGetH2HMatches(t *testing.T) {
+	tests := []struct {
+		name        string
+		statusCode  int
+		body        string
+		wantErr     bool
+		wantResults int
+	}{
+		{
+			name:       "valid single page",
+			statusCode: http.StatusOK,
+			body: `{
+				"has_next": false,
+				"page": 1,
+				"results": [
+					{
+						"id": 13799773,
+						"entry_1_entry": 4350338,
+						"entry_1_name": "doyourwirtz",
+						"entry_1_player_name": "William Denman",
+						"entry_1_points": 55,
+						"entry_1_win": 0,
+						"entry_1_draw": 1,
+						"entry_1_loss": 0,
+						"entry_1_total": 1,
+						"entry_2_entry": 4693819,
+						"entry_2_name": "Declan Twice!",
+						"entry_2_player_name": "Chris Longe",
+						"entry_2_points": 55,
+						"entry_2_win": 0,
+						"entry_2_draw": 1,
+						"entry_2_loss": 0,
+						"entry_2_total": 1,
+						"is_knockout": false,
+						"league": 916670,
+						"winner": null,
+						"seed_value": null,
+						"event": 1,
+						"tiebreak": null,
+						"is_bye": false,
+						"knockout_name": ""
+					}
+				]
+			}`,
+			wantResults: 1,
+		},
+		{
+			name:       "invalid event",
+			statusCode: http.StatusBadRequest,
+			body:       `{"event":[{"message":"Not a valid event id","code":"invalid"}]}`,
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.statusCode)
+				w.Write([]byte(tt.body))
+			}))
+			defer srv.Close()
+
+			client := fpl.NewClient(srv.URL, srv.Client())
+			resp, err := client.GetH2HMatches(context.Background(), 916670, 1, 1)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if got := len(resp.Results); got != tt.wantResults {
+				t.Fatalf("results count = %d, want %d", got, tt.wantResults)
+			}
+
+			match := resp.Results[0]
+			if match.Entry1Entry != 4350338 {
+				t.Errorf("Entry1Entry = %d, want 4350338", match.Entry1Entry)
+			}
+			if match.Entry2PlayerName != "Chris Longe" {
+				t.Errorf("Entry2PlayerName = %q, want %q", match.Entry2PlayerName, "Chris Longe")
+			}
+			if match.IsBye {
+				t.Error("IsBye = true, want false")
+			}
+			if match.Winner != nil {
+				t.Errorf("Winner = %v, want nil for a draw", *match.Winner)
+			}
+		})
+	}
+}
+
+func TestGetH2HMatchesURLPath(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.String()
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"has_next":false,"page":1,"results":[]}`))
+	}))
+	defer srv.Close()
+
+	client := fpl.NewClient(srv.URL, srv.Client())
+	_, err := client.GetH2HMatches(context.Background(), 916670, 3, 7)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantPath := "/leagues-h2h-matches/league/916670/?page=3&event=7"
+	if gotPath != wantPath {
+		t.Errorf("URL path = %q, want %q", gotPath, wantPath)
+	}
+}
+
+func TestGetAllH2HMatches(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		switch page {
+		case "1", "":
+			w.Write([]byte(`{
+				"has_next": true,
+				"page": 1,
+				"results": [
+					{"id": 1, "entry_1_entry": 100, "entry_1_points": 60, "entry_2_entry": 200, "entry_2_points": 58, "league": 916670, "event": 5, "is_bye": false, "knockout_name": ""}
+				]
+			}`))
+		case "2":
+			w.Write([]byte(`{
+				"has_next": false,
+				"page": 2,
+				"results": [
+					{"id": 2, "entry_1_entry": 300, "entry_1_points": 48, "entry_2_entry": 400, "entry_2_points": 52, "league": 916670, "event": 5, "is_bye": false, "knockout_name": ""}
+				]
+			}`))
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	client := fpl.NewClient(srv.URL, srv.Client())
+	resp, err := client.GetAllH2HMatches(context.Background(), 916670, 5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := len(resp.Results); got != 2 {
+		t.Fatalf("results count = %d, want 2", got)
+	}
+	if resp.HasNext {
+		t.Error("HasNext = true, want false after merging all pages")
+	}
+	if resp.Page != 2 {
+		t.Errorf("Page = %d, want 2", resp.Page)
+	}
+	if resp.Results[1].Entry2Entry != 400 {
+		t.Errorf("second page result not merged correctly: %+v", resp.Results[1])
+	}
+}
+
 func TestGetManagerHistory(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -760,6 +923,9 @@ func TestContextCancellation(t *testing.T) {
 	}
 	if _, err := client.GetH2HStandings(ctx, 1, 1); err == nil {
 		t.Error("GetH2HStandings: expected error from cancelled context, got nil")
+	}
+	if _, err := client.GetH2HMatches(ctx, 1, 1, 1); err == nil {
+		t.Error("GetH2HMatches: expected error from cancelled context, got nil")
 	}
 	if _, err := client.GetManagerHistory(ctx, 1); err == nil {
 		t.Error("GetManagerHistory: expected error from cancelled context, got nil")
