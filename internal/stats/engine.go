@@ -332,8 +332,21 @@ func (e *Engine) getHistoricalRanks(ctx context.Context, eventID int) (map[int64
 }
 
 func buildCurrentStreaks(managerByID map[int64]notify.ManagerRef, results []store.H2HResult) []CurrentStreak {
+	// Normalize result ordering here so streak logic does not depend on any
+	// specific Store implementation or fake returning rows chronologically.
+	sortedResults := append([]store.H2HResult(nil), results...)
+	sort.Slice(sortedResults, func(i, j int) bool {
+		if sortedResults[i].EventID != sortedResults[j].EventID {
+			return sortedResults[i].EventID < sortedResults[j].EventID
+		}
+		if sortedResults[i].Manager1ID != sortedResults[j].Manager1ID {
+			return sortedResults[i].Manager1ID < sortedResults[j].Manager1ID
+		}
+		return sortedResults[i].Manager2ID < sortedResults[j].Manager2ID
+	})
+
 	outcomes := make(map[int64][]eventOutcome)
-	for _, result := range results {
+	for _, result := range sortedResults {
 		manager1Outcome, manager2Outcome := outcomesForResult(result)
 		outcomes[result.Manager1ID] = append(outcomes[result.Manager1ID], eventOutcome{
 			EventID: result.EventID,

@@ -274,6 +274,30 @@ func TestGetCurrentStreaks(t *testing.T) {
 	}
 }
 
+func TestBuildCurrentStreaksSortsResultsBeforeComputingCurrentStreak(t *testing.T) {
+	managerByID := map[int64]notify.ManagerRef{
+		101: {ID: 101, Name: "Alice", TeamName: "Alice FC"},
+		202: {ID: 202, Name: "Bob", TeamName: "Bob FC"},
+	}
+
+	streaks := buildCurrentStreaks(managerByID, []store.H2HResult{
+		{LeagueID: 916670, EventID: 1, Manager1ID: 101, Manager1Score: 40, Manager2ID: 202, Manager2Score: 60},
+		{LeagueID: 916670, EventID: 3, Manager1ID: 101, Manager1Score: 72, Manager2ID: 202, Manager2Score: 49},
+		{LeagueID: 916670, EventID: 2, Manager1ID: 101, Manager1Score: 66, Manager2ID: 202, Manager2Score: 58},
+	})
+
+	if len(streaks) != 2 {
+		t.Fatalf("len(streaks) = %d, want 2", len(streaks))
+	}
+
+	if streaks[0].Manager.ID != 101 || streaks[0].Kind != notify.StreakKindWin || streaks[0].Length != 2 || streaks[0].StartedAt != 2 || streaks[0].FinishedAt != 3 {
+		t.Errorf("streaks[0] = %+v, want Alice win streak from GW2-GW3", streaks[0])
+	}
+	if streaks[1].Manager.ID != 202 || streaks[1].Kind != notify.StreakKindLoss || streaks[1].Length != 2 || streaks[1].StartedAt != 2 || streaks[1].FinishedAt != 3 {
+		t.Errorf("streaks[1] = %+v, want Bob loss streak from GW2-GW3", streaks[1])
+	}
+}
+
 func TestGetH2HRecord(t *testing.T) {
 	engine := New(&fakeStore{
 		resultsByEvent: map[int][]store.H2HResult{
