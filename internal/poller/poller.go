@@ -407,10 +407,11 @@ func (p *Poller) findRelevantEvent() *fpl.Event {
 //  2. Upsert league (FK prerequisite)
 //  3. Upsert managers (FK prerequisite)
 //  4. Fetch manager histories
-//  5. Fetch H2H matches
-//  6. Map to store types
-//  7. Save snapshot (atomic transaction)
-//  8. Fire callback (if set)
+//  5. Map standings to store types
+//  6. Fetch H2H matches
+//  7. Map H2H results to store types
+//  8. Save snapshot (atomic transaction)
+//  9. Fire callback (if set)
 //
 // If ANY step fails — including the callback — the entire finalization is
 // considered failed. The poller does NOT advance lastProcessedEvent, so
@@ -420,7 +421,7 @@ func (p *Poller) findRelevantEvent() *fpl.Event {
 // dedup guard after persistence but before a successful callback, a
 // transient stats/notifier failure would permanently suppress alerts for
 // that gameweek. Since the persistence layer uses idempotent upserts
-// (ON CONFLICT), replaying steps 1-6 on retry is safe.
+// (ON CONFLICT), replaying steps 1-8 on retry is safe.
 func (p *Poller) finalize(ctx context.Context, eventID int) error {
 	leagueID := int64(p.cfg.LeagueID)
 
@@ -461,14 +462,15 @@ func (p *Poller) finalize(ctx context.Context, eventID int) error {
 	// Step 5: Map standings to store types.
 	standings := mapStandings(leagueID, eventID, standingsResp.Standings.Results)
 
-	// Step 6: Fetch and map the actual H2H fixtures for this event.
+	// Step 6: Fetch the actual H2H fixtures for this event.
 	matchesResp, err := p.fpl.GetAllH2HMatches(ctx, p.cfg.LeagueID, eventID)
 	if err != nil {
 		return fmt.Errorf("fetching h2h matches: %w", err)
 	}
-	results := mapH2HResults(leagueID, matchesResp.Results)
+	// Step 7: Map H2H fixtures to store types.
+	results := mapH2HResults(leagueID, eventID, matchesResp.Results)
 
-	// Step 7: Save the snapshot atomically (standings + chips + results + meta).
+	// Step 8: Save the snapshot atomically (standings + chips + results + meta).
 	meta := store.SnapshotMeta{
 		LeagueID:          leagueID,
 		EventID:           eventID,
@@ -486,7 +488,7 @@ func (p *Poller) finalize(ctx context.Context, eventID int) error {
 		"h2h_results", len(results),
 	)
 
-	// Step 8: Fire the callback (if set).
+	// Step 9: Fire the callback (if set).
 	if p.onFinalized != nil {
 		if err := p.onFinalized(ctx, eventID); err != nil {
 			return fmt.Errorf("onFinalized callback: %w", err)

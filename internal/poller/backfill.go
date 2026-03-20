@@ -160,7 +160,7 @@ func (p *Poller) Backfill(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("fetching h2h matches for GW %d: %w", eventID, err)
 		}
-		results := mapH2HResults(leagueID, matchesResp.Results)
+		results := mapH2HResults(leagueID, eventID, matchesResp.Results)
 
 		// Persist the snapshot atomically (standings + chips + results + meta).
 		meta := store.SnapshotMeta{

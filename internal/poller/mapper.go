@@ -116,7 +116,11 @@ func mapChipUsages(leagueID int64, eventID int, managerID int64, chips []fpl.Chi
 // Bye rows are skipped because the current schema models only true two-manager
 // fixtures. Standard H2H league weeks for the Capital FC league do not use
 // byes, and cup fixtures are out of scope for this phase.
-func mapH2HResults(leagueID int64, matches []fpl.H2HMatch) []store.H2HResult {
+//
+// Like the other poller mappers, the caller-provided eventID is the source of
+// truth. That keeps persisted snapshots internally consistent even if the
+// upstream payload ever reports an unexpected event value.
+func mapH2HResults(leagueID int64, eventID int, matches []fpl.H2HMatch) []store.H2HResult {
 	results := make([]store.H2HResult, 0, len(matches))
 	for _, m := range matches {
 		if m.IsBye || m.Entry1Entry == 0 || m.Entry2Entry == 0 {
@@ -135,7 +139,7 @@ func mapH2HResults(leagueID int64, matches []fpl.H2HMatch) []store.H2HResult {
 
 		results = append(results, store.H2HResult{
 			LeagueID:      leagueID,
-			EventID:       m.Event,
+			EventID:       eventID,
 			Manager1ID:    manager1ID,
 			Manager1Score: manager1Score,
 			Manager2ID:    manager2ID,
