@@ -116,6 +116,56 @@ type H2HStandingsResponse struct {
 	Standings Standings  `json:"standings"`
 }
 
+// ---------------------------------------------------------------------------
+// H2H Matches (GET /leagues-h2h-matches/league/{id}/)
+// ---------------------------------------------------------------------------
+//
+// This endpoint powers the "Matches" view in the current FPL frontend. It
+// returns the actual head-to-head pairings and scores for a specific event,
+// with optional entry filtering and pagination.
+//
+// This endpoint is separate from /leagues-h2h/{id}/standings/ and is the
+// correct source of truth for historical per-match results. The older
+// /leagues-h2h/{id}/matches/ route returned 404 during development.
+// ---------------------------------------------------------------------------
+
+// H2HMatchesResponse is the top-level response from
+// /leagues-h2h-matches/league/{id}/.
+type H2HMatchesResponse struct {
+	HasNext bool       `json:"has_next"` // More pages available
+	Page    int        `json:"page"`     // Current page number
+	Results []H2HMatch `json:"results"`  // Match rows for this page
+}
+
+// H2HMatch represents a single head-to-head fixture for one gameweek.
+type H2HMatch struct {
+	ID               int     `json:"id"`
+	Entry1Entry      int     `json:"entry_1_entry"`
+	Entry1Name       string  `json:"entry_1_name"`
+	Entry1PlayerName string  `json:"entry_1_player_name"`
+	Entry1Points     int     `json:"entry_1_points"`
+	Entry1Win        int     `json:"entry_1_win"`
+	Entry1Draw       int     `json:"entry_1_draw"`
+	Entry1Loss       int     `json:"entry_1_loss"`
+	Entry1Total      int     `json:"entry_1_total"`
+	Entry2Entry      int     `json:"entry_2_entry"`
+	Entry2Name       string  `json:"entry_2_name"`
+	Entry2PlayerName string  `json:"entry_2_player_name"`
+	Entry2Points     int     `json:"entry_2_points"`
+	Entry2Win        int     `json:"entry_2_win"`
+	Entry2Draw       int     `json:"entry_2_draw"`
+	Entry2Loss       int     `json:"entry_2_loss"`
+	Entry2Total      int     `json:"entry_2_total"`
+	IsKnockout       bool    `json:"is_knockout"`
+	League           int     `json:"league"`
+	Winner           *int    `json:"winner"`        // nil when drawn / unresolved
+	SeedValue        *int    `json:"seed_value"`    // nil outside seeded knockout contexts
+	Event            int     `json:"event"`         // Gameweek number
+	Tiebreak         *string `json:"tiebreak"`      // nil when no tiebreak applied
+	IsBye            bool    `json:"is_bye"`        // true when one side progresses automatically
+	KnockoutName     string  `json:"knockout_name"` // Empty for standard league fixtures
+}
+
 // LeagueInfo contains metadata about the league.
 type LeagueInfo struct {
 	ID      int    `json:"id"`

@@ -49,6 +49,9 @@ type fakeFPLClient struct {
 	eventStatusErr error
 	standings      fpl.H2HStandingsResponse
 	standingsErr   error
+	matches        fpl.H2HMatchesResponse
+	matchesByEvent map[int]fpl.H2HMatchesResponse
+	matchesErr     error
 	histories      map[int]fpl.ManagerHistoryResponse
 	historyErr     error
 }
@@ -63,6 +66,34 @@ func (f *fakeFPLClient) GetEventStatus(_ context.Context) (fpl.EventStatusRespon
 
 func (f *fakeFPLClient) GetAllH2HStandings(_ context.Context, _ int) (fpl.H2HStandingsResponse, error) {
 	return f.standings, f.standingsErr
+}
+
+func (f *fakeFPLClient) GetAllH2HMatches(_ context.Context, _ int, eventID int) (fpl.H2HMatchesResponse, error) {
+	if f.matchesErr != nil {
+		return fpl.H2HMatchesResponse{}, f.matchesErr
+	}
+	if resp, ok := f.matchesByEvent[eventID]; ok {
+		return resp, nil
+	}
+	if len(f.matches.Results) > 0 {
+		return f.matches, nil
+	}
+	if len(f.standings.Standings.Results) >= 2 {
+		return fpl.H2HMatchesResponse{
+			Results: []fpl.H2HMatch{
+				{
+					ID:          eventID,
+					League:      f.standings.League.ID,
+					Event:       eventID,
+					Entry1Entry: f.standings.Standings.Results[0].EntryID,
+					Entry1Points: 55,
+					Entry2Entry: f.standings.Standings.Results[1].EntryID,
+					Entry2Points: 48,
+				},
+			},
+		}, nil
+	}
+	return fpl.H2HMatchesResponse{}, nil
 }
 
 func (f *fakeFPLClient) GetManagerHistory(_ context.Context, managerID int) (fpl.ManagerHistoryResponse, error) {
@@ -90,6 +121,7 @@ type fakeStore struct {
 	snapshotCalls    int
 	lastStandings    []store.GameweekStanding
 	lastChips        []store.ChipUsage
+	lastResults      []store.H2HResult
 	snapshotErr      error
 
 	// Backfill-related fields
@@ -113,10 +145,11 @@ func (f *fakeStore) UpsertManager(_ context.Context, manager store.Manager) erro
 	return nil
 }
 
-func (f *fakeStore) SaveGameweekSnapshot(_ context.Context, standings []store.GameweekStanding, chips []store.ChipUsage, _ []store.H2HResult, meta store.SnapshotMeta) error {
+func (f *fakeStore) SaveGameweekSnapshot(_ context.Context, standings []store.GameweekStanding, chips []store.ChipUsage, results []store.H2HResult, meta store.SnapshotMeta) error {
 	f.snapshotCalls++
 	f.lastStandings = standings
 	f.lastChips = chips
+	f.lastResults = results
 	f.snapshotMetas = append(f.snapshotMetas, meta)
 	if len(standings) > 0 {
 		f.savedEventIDs = append(f.savedEventIDs, standings[0].EventID)
@@ -373,6 +406,11 @@ func TestTick(t *testing.T) {
 				fc.histories = map[int]fpl.ManagerHistoryResponse{
 					100: {Chips: []fpl.ChipUsage{{Event: 5, Name: "wildcard"}}},
 				}
+				fc.matches = fpl.H2HMatchesResponse{
+					Results: []fpl.H2HMatch{
+						{ID: 1, League: 42, Event: 5, Entry1Entry: 100, Entry1Points: 72, Entry2Entry: 200, Entry2Points: 61},
+					},
+				}
 			},
 			wantState:     StateIdle,
 			wantFinalized: true,
@@ -397,6 +435,7 @@ func TestTick(t *testing.T) {
 					League:    fpl.LeagueInfo{ID: 42, Name: "Test League"},
 					Standings: fpl.Standings{Results: []fpl.StandingEntry{}},
 				}
+				fc.matches = fpl.H2HMatchesResponse{Results: []fpl.H2HMatch{}}
 			},
 			wantState:     StateIdle,
 			wantFinalized: true,
@@ -482,6 +521,7 @@ func TestTick(t *testing.T) {
 					League:    fpl.LeagueInfo{ID: 42, Name: "Test League"},
 					Standings: fpl.Standings{Results: []fpl.StandingEntry{}},
 				}
+				fc.matches = fpl.H2HMatchesResponse{Results: []fpl.H2HMatch{}}
 			},
 			wantState:     StateProcessing,
 			wantFinalized: true, // snapshot saved before callback failed
@@ -565,6 +605,7 @@ func TestTick_FinalizationAdvancesGuard(t *testing.T) {
 			League:    fpl.LeagueInfo{ID: 42, Name: "Test League"},
 			Standings: fpl.Standings{Results: []fpl.StandingEntry{}},
 		},
+		matches:   fpl.H2HMatchesResponse{Results: []fpl.H2HMatch{}},
 		histories: make(map[int]fpl.ManagerHistoryResponse),
 	}
 	fs := &fakeStore{}
@@ -614,6 +655,11 @@ func TestTick_FinalizationPersistsCorrectData(t *testing.T) {
 					{EntryID: 100, PlayerName: "Alice", EntryName: "Team A", Rank: 1, Total: 15, PointsFor: 500},
 					{EntryID: 200, PlayerName: "Bob", EntryName: "Team B", Rank: 2, Total: 12, PointsFor: 480},
 				},
+			},
+		},
+		matches: fpl.H2HMatchesResponse{
+			Results: []fpl.H2HMatch{
+				{ID: 1, League: 42, Event: 10, Entry1Entry: 200, Entry1Points: 48, Entry2Entry: 100, Entry2Points: 65},
 			},
 		},
 		histories: map[int]fpl.ManagerHistoryResponse{
@@ -671,6 +717,17 @@ func TestTick_FinalizationPersistsCorrectData(t *testing.T) {
 	if fs.lastChips[0].ManagerID != 100 {
 		t.Errorf("chip manager_id = %d, want 100", fs.lastChips[0].ManagerID)
 	}
+
+	// Verify H2H results were canonicalized before persistence.
+	if len(fs.lastResults) != 1 {
+		t.Fatalf("saved %d h2h results, want 1", len(fs.lastResults))
+	}
+	if fs.lastResults[0].Manager1ID != 100 || fs.lastResults[0].Manager2ID != 200 {
+		t.Errorf("result manager order = %d/%d, want 100/200", fs.lastResults[0].Manager1ID, fs.lastResults[0].Manager2ID)
+	}
+	if fs.lastResults[0].Manager1Score != 65 || fs.lastResults[0].Manager2Score != 48 {
+		t.Errorf("result scores = %d/%d, want 65/48", fs.lastResults[0].Manager1Score, fs.lastResults[0].Manager2Score)
+	}
 }
 
 // TestTick_CallbackFailureDoesNotAdvanceGuard verifies that if the
@@ -691,6 +748,7 @@ func TestTick_CallbackFailureDoesNotAdvanceGuard(t *testing.T) {
 			League:    fpl.LeagueInfo{ID: 42, Name: "Test League"},
 			Standings: fpl.Standings{Results: []fpl.StandingEntry{}},
 		},
+		matches:   fpl.H2HMatchesResponse{Results: []fpl.H2HMatch{}},
 		histories: make(map[int]fpl.ManagerHistoryResponse),
 	}
 	fs := &fakeStore{}
@@ -964,4 +1022,3 @@ func TestMapChipUsages_NilInput(t *testing.T) {
 		t.Errorf("len = %d, want 0 for nil input", len(got))
 	}
 }
-

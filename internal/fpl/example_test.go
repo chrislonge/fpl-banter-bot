@@ -165,3 +165,29 @@ func TestLiveAPI_ManagerHistory(t *testing.T) {
 		t.Logf("  Chip: %s (GW%d)", chip.Name, chip.Event)
 	}
 }
+
+func TestLiveAPI_H2HMatches(t *testing.T) {
+	skipUnlessLive(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), liveTimeout)
+	defer cancel()
+
+	client := fpl.NewClient(liveBaseURL, nil)
+
+	resp, err := client.GetAllH2HMatches(ctx, 916670, 1)
+	if err != nil {
+		t.Fatalf("GetAllH2HMatches: %v", err)
+	}
+
+	t.Logf("Matches returned: %d", len(resp.Results))
+	for i, match := range resp.Results {
+		if i >= 5 {
+			break
+		}
+		t.Logf("  GW%d: %s (%d) vs %s (%d)",
+			match.Event,
+			match.Entry1PlayerName, match.Entry1Points,
+			match.Entry2PlayerName, match.Entry2Points,
+		)
+	}
+}
