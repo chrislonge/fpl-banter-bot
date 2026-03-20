@@ -95,7 +95,8 @@ brew install golang-migrate
 git clone https://github.com/chrislonge/fpl-banter-bot.git
 cd fpl-banter-bot
 cp .env.example .env
-# Edit .env with your Telegram bot token, chat ID, and league ID
+# Edit .env with your league ID and database URL.
+# Telegram credentials are optional — see Configuration.
 ```
 
 `.env.example` is the documented template (committed to git). `.env` holds your local values and is gitignored — never commit it.
@@ -120,6 +121,17 @@ The bot starts the polling state machine, which adaptively polls the FPL API bas
 
 **Graceful shutdown:** Press `Ctrl+C` or send `SIGTERM` to trigger a clean shutdown. The bot finishes its current poll cycle, closes database connections, and exits.
 
+### Operating modes
+
+The bot supports two operating modes, controlled by whether Telegram credentials are present:
+
+| Mode | Telegram vars | Behavior |
+|------|---------------|----------|
+| **Data collection only** | Omitted | Polls the FPL API, persists standings and chip data to Postgres. No notifications sent. |
+| **Full** | Both set | Polls, persists, and sends banter-worthy alerts to the configured chat. |
+
+Data-collection-only mode is useful for building up historical data before enabling notifications, or for running the bot purely as a data pipeline. Setting only one of `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` is treated as a misconfiguration and the bot will refuse to start.
+
 ### 4. Backfill historical gameweeks (optional)
 
 If the bot was deployed mid-season, it only has data from the gameweek it first ran. The backfill command populates all previous finished gameweeks:
@@ -143,8 +155,8 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 |----------|----------|-------------|
 | `FPL_LEAGUE_ID` | Yes | Your FPL league ID (find it in the URL of your league's page) |
 | `FPL_LEAGUE_TYPE` | No | `h2h` or `classic` (default: `h2h`) |
-| `TELEGRAM_BOT_TOKEN` | Yes | Token from [@BotFather](https://t.me/BotFather) |
-| `TELEGRAM_CHAT_ID` | Yes | Target group chat ID |
+| `TELEGRAM_BOT_TOKEN` | No | Token from @BotFather (omit for data-collection-only mode) |
+| `TELEGRAM_CHAT_ID` | No | Target group chat ID (omit for data-collection-only mode) |
 | `DATABASE_URL` | Yes | Postgres connection string |
 | `STORE_TEST_DATABASE_URL` | No | Test database connection string (for integration tests) |
 | `POLL_IDLE_INTERVAL` | No | Seconds between polls when idle (default: `21600` — 6 hours) |

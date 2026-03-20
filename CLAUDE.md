@@ -23,7 +23,7 @@ The project is open source, designed for multi-tenancy, and structured to suppor
 1. **Every table has `league_id`**. This enables multi-tenancy without schema changes.
 2. **The Notifier interface lives in `pkg/notify/`**. Platform implementations (Telegram, Discord) go in subdirectories. The stats engine never imports a platform-specific package.
 3. **The FPL client is in `internal/fpl/`**. It parses raw JSON into typed Go structs at the boundary. Downstream code never works with `map[string]interface{}`.
-4. **Configuration is via environment variables**. No hardcoded league IDs, tokens, or connection strings. Use the `config` package to read and validate env vars at startup.
+4. **Configuration is via environment variables**. No hardcoded league IDs, tokens, or connection strings. Use the `config` package to read and validate env vars at startup. Telegram credentials are optional — if absent, the bot runs in data-collection-only mode.
 5. **Composite primary keys for idempotency**. The schema uses compound keys (e.g., `league_id, event_id, manager_id`) so duplicate inserts can use `ON CONFLICT` safely.
 
 ## Project Structure
