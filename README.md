@@ -1,6 +1,6 @@
 # fpl-banter-bot
 
-> **Status:** Early development — Phase 1 of 4 in progress. The FPL client, data store, and polling state machine are complete. The stats engine and Telegram notifier are not yet implemented. Running the bot starts the poller, which polls the FPL API on an adaptive schedule and persists gameweek data automatically.
+> **Status:** Early development — Phase 1 of 4 in progress. The FPL client, data store, polling state machine, historical H2H ingestion, and stats engine are implemented. Telegram delivery is still pending, so running the bot currently collects data and computes alerts without sending them to chat.
 
 A self-hosted bot that tracks your Fantasy Premier League mini-league and posts banter-worthy stats to your group chat after each gameweek. Built in Go, runs on a Raspberry Pi.
 
@@ -130,7 +130,7 @@ The bot supports two operating modes, controlled by whether Telegram credentials
 | **Data collection only** | Omitted | Polls the FPL API, persists standings and chip data to Postgres. No notifications sent. |
 | **Full** | Both set | Polls and persists data, plus sends banter-worthy alerts to the configured chat when the notification pipeline is enabled. |
 
-> **Current status:** The notification pipeline (stats engine → Notifier) is not yet wired. Both modes currently collect and persist data only. Setting Telegram credentials validates them at startup so the bot is ready when notifications are enabled in a future release.
+> **Current status:** The stats engine now computes structured alerts, but the notification pipeline is not wired to Telegram yet. Both modes currently collect and persist data; full mode additionally validates Telegram credentials so delivery can be enabled in the next phase.
 
 Data-collection-only mode is useful for building up historical data before enabling notifications, or for running the bot purely as a data pipeline. Setting only one of `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` is treated as a misconfiguration and the bot will refuse to start.
 
@@ -145,9 +145,9 @@ make backfill
 
 This is a one-time operation. It detects which gameweeks are missing from the database and fills the gaps. Running it again is safe (idempotent) — it skips gameweeks that already exist. Press `Ctrl+C` to cancel mid-backfill; progress is saved per-gameweek.
 
-> **Important limitation:** The FPL API does not serve historical standings snapshots — `GetAllH2HStandings()` always returns the *current* cumulative league table. This means backfilled standings (ranks, H2H points) reflect today's values, not what the table looked like at each gameweek. Chip usage IS fully historical (sourced from `GetManagerHistory()`).
+> **Important limitation:** The FPL API does not serve historical standings snapshots — `GetAllH2HStandings()` always returns the *current* cumulative league table. This means backfilled standings (ranks, H2H points) reflect today's values, not what the table looked like at each gameweek. Chip usage and H2H match results ARE fully historical.
 >
-> The bot tags every snapshot with its provenance in the `gameweek_snapshot_meta` table (`source=backfill, standings_fidelity=synthetic`), so the stats engine knows to skip rank-change and streak alerts for backfilled gameweeks while still using the accurate chip data. Snapshots captured during normal live polling are tagged `source=live, standings_fidelity=historical` and are fully trustworthy.
+> The bot tags every snapshot with its provenance in the `gameweek_snapshot_meta` table (`source=backfill, standings_fidelity=synthetic`), so the stats engine knows to skip rank-change alerts for synthetic standings while still using accurate chip data and real H2H results. Snapshots captured during normal live polling are tagged `source=live, standings_fidelity=historical` and are fully trustworthy.
 
 ## Configuration
 
@@ -174,7 +174,7 @@ cmd/backfill/        Backfill CLI — populates historical gameweeks
 internal/config/     Environment variable loading + validation
 internal/fpl/        FPL HTTP client + API response types
 internal/poller/     Gameweek lifecycle state machine (Idle → Live → Processing)
-internal/stats/      Diff engine + alert detection (planned)
+internal/stats/      Diff engine + alert detection
 internal/store/      Database interface + Postgres implementation + embedded migrations
 pkg/notify/          Notifier interface (public API for chat platforms)
 pkg/notify/telegram/ Telegram implementation (planned)
@@ -225,6 +225,7 @@ FPL_LIVE_TEST=1 go test ./internal/fpl/ -run TestLiveAPI -v
 FPL_LIVE_TEST=1 go test ./internal/fpl/ -run TestLiveAPI_Bootstrap -v
 FPL_LIVE_TEST=1 go test ./internal/fpl/ -run TestLiveAPI_EventStatus -v
 FPL_LIVE_TEST=1 go test ./internal/fpl/ -run TestLiveAPI_H2HStandings -v
+FPL_LIVE_TEST=1 go test ./internal/fpl/ -run TestLiveAPI_H2HMatches -v
 FPL_LIVE_TEST=1 go test ./internal/fpl/ -run TestLiveAPI_ManagerHistory -v
 ```
 

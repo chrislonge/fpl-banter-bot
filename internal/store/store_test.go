@@ -304,6 +304,43 @@ func TestUpsertAndGetH2HResult(t *testing.T) {
 	}
 }
 
+func TestGetH2HResultsRange(t *testing.T) {
+	truncateTables(t)
+	ctx := context.Background()
+
+	seedLeague(t, 100, "Test League", "h2h")
+	seedManager(t, 100, 1001, "Alice", "Alice FC")
+	seedManager(t, 100, 1002, "Bob", "Bob FC")
+	seedManager(t, 100, 1003, "Charlie", "Charlie FC")
+
+	for _, result := range []store.H2HResult{
+		{LeagueID: 100, EventID: 4, Manager1ID: 1001, Manager1Score: 51, Manager2ID: 1002, Manager2Score: 40},
+		{LeagueID: 100, EventID: 6, Manager1ID: 1001, Manager1Score: 62, Manager2ID: 1003, Manager2Score: 58},
+		{LeagueID: 100, EventID: 5, Manager1ID: 1002, Manager1Score: 47, Manager2ID: 1003, Manager2Score: 47},
+	} {
+		if err := testStore.UpsertH2HResult(ctx, result); err != nil {
+			t.Fatalf("UpsertH2HResult: %v", err)
+		}
+	}
+
+	results, err := testStore.GetH2HResultsRange(ctx, 100, 4, 5)
+	if err != nil {
+		t.Fatalf("GetH2HResultsRange: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("len(results) = %d, want 2", len(results))
+	}
+	if results[0].EventID != 4 || results[1].EventID != 5 {
+		t.Errorf("event ordering = [%d %d], want [4 5]", results[0].EventID, results[1].EventID)
+	}
+	if results[0].Manager1ID != 1001 || results[0].Manager2ID != 1002 {
+		t.Errorf("first result = %+v, want Alice vs Bob in GW4", results[0])
+	}
+	if results[1].Manager1ID != 1002 || results[1].Manager2ID != 1003 {
+		t.Errorf("second result = %+v, want Bob vs Charlie in GW5", results[1])
+	}
+}
+
 func TestSaveGameweekSnapshot(t *testing.T) {
 	truncateTables(t)
 	ctx := context.Background()

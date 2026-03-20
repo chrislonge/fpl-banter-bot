@@ -8,14 +8,105 @@ package notify
 
 import "context"
 
-// Alert represents a single banter-worthy event detected by the stats engine.
-// The stats engine produces these; the Notifier consumes them.
-type Alert struct {
-	// Type categorises the alert (e.g., "rank_change", "streak", "chip_usage").
-	Type string
+// AlertKind categorises a banter-worthy event detected by the stats engine.
+type AlertKind string
 
-	// Message is the human-readable text to send.
-	Message string
+const (
+	AlertKindRankChange      AlertKind = "rank_change"
+	AlertKindStreak          AlertKind = "streak"
+	AlertKindChipUsage       AlertKind = "chip_usage"
+	AlertKindGameweekSummary AlertKind = "gameweek_summary"
+	AlertKindH2HResult       AlertKind = "h2h_result"
+)
+
+// StreakKind identifies the type of streak.
+type StreakKind string
+
+const (
+	StreakKindWin  StreakKind = "win"
+	StreakKindLoss StreakKind = "loss"
+)
+
+// ManagerRef carries the minimum identity a notifier needs to describe a
+// manager without making another store lookup.
+type ManagerRef struct {
+	ID       int64
+	Name     string
+	TeamName string
+}
+
+// ManagerScore pairs a manager with a single gameweek score.
+type ManagerScore struct {
+	Manager ManagerRef
+	Score   int
+}
+
+// Alert is a structured event emitted by the stats engine.
+//
+// Exactly one detail payload should be populated based on Kind. Keeping the
+// payload structured lets the notifier decide how to render the alert for a
+// specific chat platform without re-querying business data.
+type Alert struct {
+	Kind     AlertKind
+	LeagueID int64
+	EventID  int
+
+	RankChange      *RankChangeAlert
+	Streak          *StreakAlert
+	ChipUsage       *ChipUsageAlert
+	GameweekSummary *GameweekSummaryAlert
+	H2HResult       *H2HResultAlert
+}
+
+// RankChangeAlert reports a movement in the league table relative to the
+// previous gameweek.
+type RankChangeAlert struct {
+	Manager        ManagerRef
+	PreviousRank   int
+	CurrentRank    int
+	MovedIntoFirst bool
+}
+
+// StreakAlert reports a current win or loss streak.
+type StreakAlert struct {
+	Manager    ManagerRef
+	Kind       StreakKind
+	Length     int
+	StartedAt  int
+	FinishedAt int
+}
+
+// ChipUsageAlert reports a chip played in a specific gameweek.
+type ChipUsageAlert struct {
+	Manager ManagerRef
+	Chip    string
+}
+
+// UpsetAlert reports a lower-ranked manager beating a higher-ranked one.
+type UpsetAlert struct {
+	Winner             ManagerRef
+	WinnerScore        int
+	WinnerPreviousRank int
+	Loser              ManagerRef
+	LoserScore         int
+	LoserPreviousRank  int
+	RankGap            int
+}
+
+// GameweekSummaryAlert reports the top-level summary for a gameweek.
+type GameweekSummaryAlert struct {
+	HighScorer   ManagerScore
+	LowScorer    ManagerScore
+	BiggestUpset *UpsetAlert
+}
+
+// H2HResultAlert reports the outcome of a single head-to-head fixture.
+type H2HResultAlert struct {
+	Manager1 ManagerRef
+	Score1   int
+	Manager2 ManagerRef
+	Score2   int
+	WinnerID *int64
 }
 
 // Notifier sends alerts to a chat platform. Implementations must be safe for
