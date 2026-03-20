@@ -200,7 +200,7 @@ A `Makefile` wraps common commands so you don't have to remember flags and conne
 
 ```bash
 make build        # go build ./...
-make test         # go test ./... (store tests skip without DB)
+make test         # go test ./... (includes store tests if STORE_TEST_DATABASE_URL is set via .env)
 make test-store   # store integration tests against real Postgres
 make test-all     # all tests including store integration
 make lint         # golangci-lint run
@@ -211,7 +211,7 @@ make db-down      # docker compose down
 make db-reset     # destroy + recreate DB (needed after schema changes)
 ```
 
-The Makefile automatically loads your `.env` file, so variables like `STORE_TEST_DATABASE_URL` are available without typing them.
+The Makefile automatically loads your `.env` file, so variables like `STORE_TEST_DATABASE_URL` are available without typing them. That means `make test` will include store integration tests whenever your `.env` sets a test database URL.
 
 ### Live API tests
 

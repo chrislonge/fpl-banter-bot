@@ -666,6 +666,7 @@ func TestGetStoredEventIDs_Multiple(t *testing.T) {
 func TestUpsertAndGetSnapshotMeta(t *testing.T) {
 	truncateTables(t)
 	ctx := context.Background()
+	seedLeague(t, 100, "Test League", "h2h")
 
 	meta := store.SnapshotMeta{
 		LeagueID:          100,
