@@ -3,6 +3,7 @@ package fpl
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -50,6 +51,36 @@ const maxH2HStandingsPages = 1000
 
 // maxH2HMatchesPages is the same defensive guard for the H2H matches API.
 const maxH2HMatchesPages = 1000
+
+// ErrGameUpdating is returned when the FPL API temporarily serves the
+// "The game is being updated." maintenance message instead of JSON.
+var ErrGameUpdating = errors.New("fpl: game is updating")
+
+// APIError preserves HTTP-level context for non-200 FPL responses while still
+// allowing callers to classify known transient conditions with errors.Is.
+type APIError struct {
+	StatusCode int
+	Path       string
+	Body       string
+	Err        error
+}
+
+func (e *APIError) Error() string {
+	if e.Body != "" {
+		return fmt.Sprintf("unexpected status %d for %s: %s", e.StatusCode, e.Path, e.Body)
+	}
+	return fmt.Sprintf("unexpected status %d for %s", e.StatusCode, e.Path)
+}
+
+func (e *APIError) Unwrap() error {
+	return e.Err
+}
+
+// IsGameUpdating reports whether err represents the transient FPL maintenance
+// window where endpoints return "The game is being updated.".
+func IsGameUpdating(err error) bool {
+	return errors.Is(err, ErrGameUpdating)
+}
 
 // NewClient creates a new FPL API client.
 //
@@ -161,11 +192,17 @@ func (c *Client) do(ctx context.Context, path string, target any) error {
 			}
 		}
 
-		if bodySnippet != "" {
-			return fmt.Errorf("unexpected status %d for %s: %s", resp.StatusCode, path, bodySnippet)
+		apiErr := &APIError{
+			StatusCode: resp.StatusCode,
+			Path:       path,
+			Body:       bodySnippet,
+		}
+		if resp.StatusCode == http.StatusServiceUnavailable &&
+			strings.Contains(strings.ToLower(bodySnippet), "game is being updated") {
+			apiErr.Err = ErrGameUpdating
 		}
 
-		return fmt.Errorf("unexpected status %d for %s", resp.StatusCode, path)
+		return apiErr
 	}
 
 	// Stream-decode the JSON response directly from the body.

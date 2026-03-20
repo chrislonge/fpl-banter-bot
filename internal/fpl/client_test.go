@@ -40,6 +40,7 @@ package fpl_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -250,12 +251,12 @@ func TestGetBootstrapUserAgent(t *testing.T) {
 
 func TestGetEventStatus(t *testing.T) {
 	tests := []struct {
-		name        string
-		statusCode  int
-		body        string
-		wantErr     bool
+		name         string
+		statusCode   int
+		body         string
+		wantErr      bool
 		wantStatuses int
-		wantLeagues string
+		wantLeagues  string
 	}{
 		{
 			name:       "valid response",
@@ -668,6 +669,43 @@ func TestGetAllH2HMatches(t *testing.T) {
 	}
 	if resp.Results[1].Entry2Entry != 400 {
 		t.Errorf("second page result not merged correctly: %+v", resp.Results[1])
+	}
+}
+
+func TestGetH2HStandings_GameUpdating503ReturnsSentinelError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte("The game is being updated."))
+	}))
+	defer srv.Close()
+
+	client := fpl.NewClient(srv.URL, srv.Client())
+	_, err := client.GetH2HStandings(context.Background(), 916670, 1)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, fpl.ErrGameUpdating) {
+		t.Fatalf("errors.Is(err, ErrGameUpdating) = false, err = %v", err)
+	}
+	if !fpl.IsGameUpdating(err) {
+		t.Fatalf("IsGameUpdating(err) = false, err = %v", err)
+	}
+}
+
+func TestGetH2HStandings_Generic503DoesNotReturnGameUpdatingSentinel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte("Service temporarily unavailable"))
+	}))
+	defer srv.Close()
+
+	client := fpl.NewClient(srv.URL, srv.Client())
+	_, err := client.GetH2HStandings(context.Background(), 916670, 1)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if errors.Is(err, fpl.ErrGameUpdating) {
+		t.Fatalf("errors.Is(err, ErrGameUpdating) = true, err = %v", err)
 	}
 }
 

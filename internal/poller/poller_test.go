@@ -485,6 +485,18 @@ func TestTick(t *testing.T) {
 			wantErrSubstr: "event status",
 		},
 		{
+			name: "game updating during event status keeps state processing without error",
+			setup: func(fc *fakeFPLClient, _ *fakeStore, _ *Poller) {
+				fc.bootstrap = fpl.BootstrapResponse{
+					Events: []fpl.Event{
+						{ID: 5, IsCurrent: true, Finished: true, DeadlineTime: pastDeadline()},
+					},
+				}
+				fc.eventStatusErr = fpl.ErrGameUpdating
+			},
+			wantState: StateProcessing,
+		},
+		{
 			name: "finalization failure keeps state processing and does not advance guard",
 			setup: func(fc *fakeFPLClient, fs *fakeStore, _ *Poller) {
 				fc.bootstrap = fpl.BootstrapResponse{

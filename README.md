@@ -230,6 +230,10 @@ FPL_LIVE_TEST=1 go test ./internal/fpl/ -run TestLiveAPI_ManagerHistory -v
 ```
 
 These tests require network access and will fail if the FPL API is unavailable. Use them to validate that your struct definitions still match the live API responses.
+If Fantasy Premier League is in its maintenance/update window and returns
+`503 "The game is being updated."`, these live tests now skip instead of
+failing so you can distinguish an upstream maintenance window from a real
+client regression.
 
 ### Store integration tests
 
