@@ -17,9 +17,10 @@ type Config struct {
 	FPLLeagueID   int
 	FPLLeagueType string
 
-	// Telegram settings
-	TelegramBotToken string
-	TelegramChatID   string
+	// Telegram settings (optional — omit both for data-collection-only mode)
+	TelegramBotToken   string
+	TelegramChatID     string
+	TelegramConfigured bool // true when both Telegram vars are present
 
 	// Database
 	DatabaseURL string
@@ -65,14 +66,15 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("FPL_LEAGUE_ID must be an integer: %w", err)
 	}
 
-	botToken, err := required("TELEGRAM_BOT_TOKEN")
-	if err != nil {
-		return Config{}, err
-	}
+	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	chatID := os.Getenv("TELEGRAM_CHAT_ID")
 
-	chatID, err := required("TELEGRAM_CHAT_ID")
-	if err != nil {
-		return Config{}, err
+	// Partial Telegram config is a misconfiguration — fail fast.
+	// Both present = okay, both absent = data-collection-only, one missing = error.
+	if (botToken == "") != (chatID == "") {
+		return Config{}, fmt.Errorf(
+			"TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must both be set or both be absent",
+		)
 	}
 
 	return Config{
@@ -80,6 +82,7 @@ func Load() (Config, error) {
 		FPLLeagueType:          getEnvOrDefault("FPL_LEAGUE_TYPE", "h2h"),
 		TelegramBotToken:       botToken,
 		TelegramChatID:         chatID,
+		TelegramConfigured:     botToken != "" && chatID != "",
 		DatabaseURL:            dbURL,
 		PollIdleInterval:       getEnvAsIntOrDefault("POLL_IDLE_INTERVAL", 21600),
 		PollLiveInterval:       getEnvAsIntOrDefault("POLL_LIVE_INTERVAL", 900),

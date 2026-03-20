@@ -39,6 +39,12 @@ func main() {
 		"league_type", cfg.FPLLeagueType,
 	)
 
+	if cfg.TelegramConfigured {
+		slog.Info("telegram credentials configured", "platform", "telegram")
+	} else {
+		slog.Info("running in data-collection-only mode (no notification credentials configured)")
+	}
+
 	// Signal-based graceful shutdown.
 	//
 	// Go pattern — signal.NotifyContext:
@@ -124,15 +130,19 @@ func main() {
 		ProcessingInterval: time.Duration(cfg.PollProcessingInterval) * time.Second,
 	}
 
-	// Create the poller. The nil callback means no stats engine yet —
-	// the poller will collect and persist data but won't generate alerts.
-	// Phase 1.5 will provide the OnGameweekFinalized callback.
+	// Wire the notification pipeline when Telegram is configured.
+	// In data-collection-only mode, onFinalized stays nil and the poller
+	// collects + persists data without sending any notifications.
+	//
+	// TODO: wire stats engine and notifier when cfg.TelegramConfigured is true.
 	//
 	// Go pattern — IMPLICIT INTERFACE SATISFACTION:
 	// *fpl.Client satisfies poller.FPLClient, and *store.PostgresStore
 	// satisfies store.Store — no cast or "implements" keyword needed.
 	// This is Go's structural typing in action.
-	p, err := poller.New(fplClient, appStore, pollerCfg, nil)
+	var onFinalized poller.OnGameweekFinalized
+
+	p, err := poller.New(fplClient, appStore, pollerCfg, onFinalized)
 	if err != nil {
 		slog.Error("failed to create poller", "error", err)
 		os.Exit(1)
