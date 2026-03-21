@@ -1,6 +1,6 @@
 # fpl-banter-bot
 
-> **Status:** Early development — Phase 1 of 4 in progress. The FPL client, data store, polling state machine, historical H2H ingestion, and stats engine are implemented. Telegram delivery is still pending, so running the bot currently collects data and computes alerts without sending them to chat.
+> **Status:** Phase 1 complete — the proactive alert pipeline is fully wired. The bot polls the FPL API, detects gameweek finalization, computes banter-worthy stats, and posts formatted alerts to Telegram automatically. Reactive commands (Phase 1.7) are next.
 
 A self-hosted bot that tracks your Fantasy Premier League mini-league and posts banter-worthy stats to your group chat after each gameweek. Built in Go, runs on a Raspberry Pi.
 
@@ -58,8 +58,8 @@ flowchart LR
     style STORE fill:#2d6a2d,stroke:#4a4,color:#fff
     style MAIN fill:#2d6a2d,stroke:#4a4,color:#fff
     style POLLER fill:#2d6a2d,stroke:#4a4,color:#fff
-    style STATS fill:#8b6914,stroke:#c90,color:#fff
-    style NOTIFY fill:#8b6914,stroke:#c90,color:#fff
+    style STATS fill:#2d6a2d,stroke:#4a4,color:#fff
+    style NOTIFY fill:#2d6a2d,stroke:#4a4,color:#fff
 ```
 
 > **Legend:** Green = completed, Amber = planned
@@ -128,9 +128,7 @@ The bot supports two operating modes, controlled by whether Telegram credentials
 | Mode | Telegram vars | Behavior |
 |------|---------------|----------|
 | **Data collection only** | Omitted | Polls the FPL API, persists standings and chip data to Postgres. No notifications sent. |
-| **Full** | Both set | Polls and persists data, plus sends banter-worthy alerts to the configured chat when the notification pipeline is enabled. |
-
-> **Current status:** The stats engine now computes structured alerts, but the notification pipeline is not wired to Telegram yet. Both modes currently collect and persist data; full mode additionally validates Telegram credentials so delivery can be enabled in the next phase.
+| **Full** | Both set | Polls and persists data, computes stats diffs, and sends banter-worthy alerts to the configured Telegram chat when a gameweek finalizes. |
 
 Data-collection-only mode is useful for building up historical data before enabling notifications, or for running the bot purely as a data pipeline. Setting only one of `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` is treated as a misconfiguration and the bot will refuse to start.
 
@@ -171,13 +169,14 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 ```
 cmd/bot/             Main bot entrypoint — wires everything together
 cmd/backfill/        Backfill CLI — populates historical gameweeks
+cmd/notify-test/     Pipeline diagnostic — test stats → Telegram with real data
 internal/config/     Environment variable loading + validation
 internal/fpl/        FPL HTTP client + API response types
 internal/poller/     Gameweek lifecycle state machine (Idle → Live → Processing)
 internal/stats/      Diff engine + alert detection
 internal/store/      Database interface + Postgres implementation + embedded migrations
 pkg/notify/          Notifier interface (public API for chat platforms)
-pkg/notify/telegram/ Telegram implementation (planned)
+pkg/notify/telegram/ Telegram implementation (Bot API client + HTML formatter)
 ```
 
 `internal/` packages are private to this module (compiler-enforced). `pkg/` is the public API — import `pkg/notify` to build your own chat platform adapter.
@@ -192,7 +191,7 @@ type Notifier interface {
 }
 ```
 
-The Telegram implementation in `pkg/notify/telegram/` (coming in Phase 1.6) will serve as the reference. Any struct with a matching `SendAlerts` method satisfies the interface — no registration or `implements` keyword needed.
+The Telegram implementation in `pkg/notify/telegram/` serves as the reference. Any struct with a matching `SendAlerts` method satisfies the interface — no registration or `implements` keyword needed.
 
 ## Development
 
@@ -202,10 +201,12 @@ A `Makefile` wraps common commands so you don't have to remember flags and conne
 make build        # go build ./...
 make test         # go test ./... (includes store tests if STORE_TEST_DATABASE_URL is set via .env)
 make test-store   # store integration tests against real Postgres
+make test-telegram # Telegram integration test (sends a real message to your chat)
 make test-all     # all tests including store integration
 make lint         # golangci-lint run
 make run          # go run cmd/bot/main.go
 make backfill     # go run cmd/backfill/main.go (one-time historical data)
+make notify-test  # test full stats → Telegram pipeline with real DB data
 make db-up        # docker compose up -d db
 make db-down      # docker compose down
 make db-reset     # destroy + recreate DB (needed after schema changes)
@@ -250,6 +251,29 @@ STORE_TEST_DATABASE_URL="postgres://fplbot:password@localhost:5432/fplbanterbot_
 
 The test database (`fplbanterbot_test`) is created automatically by [`init.sql`](init.sql) on first Postgres startup — this file runs once when Docker initialises a fresh volume. If your Postgres volume already exists, run `make db-reset` once to recreate it.
 
+### Telegram integration test
+
+The `pkg/notify/telegram` package includes an integration test that sends a real message to your Telegram group chat. It is gated behind `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` env vars and skips gracefully without them.
+
+```bash
+# Using make (loads .env automatically)
+make test-telegram
+```
+
+This sends a hardcoded "Gameweek 99 Recap" covering every alert kind (results, rank changes, streaks, chips, summary) so you can visually verify formatting in your chat.
+
+### Pipeline diagnostic tool
+
+The `cmd/notify-test` binary exercises the full stats → Telegram pipeline using real data from your database. Unlike the integration test above, this tests the entire chain: database reads, stats engine computation, alert formatting, and Telegram delivery.
+
+```bash
+make notify-test              # latest gameweek in the database
+make notify-test GW=5         # specific gameweek
+make notify-test DRY_RUN=1    # preview formatted messages without sending
+```
+
+This requires both Postgres (with backfilled data) and Telegram credentials. Use `DRY_RUN=1` to preview the formatted message output in your terminal before sending to Telegram.
+
 ### Database management
 
 Migrations run automatically on startup via embedded SQL files — no CLI tool needed for normal use. The `golang-migrate` CLI is optional, useful for manual inspection or rollbacks.
@@ -282,7 +306,7 @@ migrate -path internal/store/migrations -database "$DATABASE_URL" down 1
 
 - **H2H leagues only** — classic league support is planned but not yet implemented. The bot fails fast on startup if `FPL_LEAGUE_TYPE` is not `h2h`.
 - **Backfill standings are synthetic** — see the [backfill section](#4-backfill-historical-gameweeks-optional) for details on this FPL API limitation.
-- **No alerts yet** — the poller collects and persists data, but the stats engine (which generates banter-worthy alerts) and Telegram notifier are not yet implemented.
+- **Proactive alerts only** — the bot posts automatically when a gameweek finalizes, but does not yet respond to user commands (`/standings`, `/streak`, etc.). Reactive commands are planned for Phase 1.7.
 
 ## License
 

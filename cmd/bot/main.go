@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -16,7 +17,9 @@ import (
 	"github.com/chrislonge/fpl-banter-bot/internal/config"
 	"github.com/chrislonge/fpl-banter-bot/internal/fpl"
 	"github.com/chrislonge/fpl-banter-bot/internal/poller"
+	"github.com/chrislonge/fpl-banter-bot/internal/stats"
 	"github.com/chrislonge/fpl-banter-bot/internal/store"
+	"github.com/chrislonge/fpl-banter-bot/pkg/notify/telegram"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -134,13 +137,44 @@ func main() {
 	// In data-collection-only mode, onFinalized stays nil and the poller
 	// collects + persists data without sending any notifications.
 	//
-	// TODO: wire stats engine and notifier when cfg.TelegramConfigured is true.
+	// Go pattern — CLOSURE AS GLUE:
+	//
+	// The closure below captures statsEngine and tgNotifier, connecting
+	// three packages (poller, stats, telegram) that never import each
+	// other. This is the idiomatic Go alternative to a DI framework —
+	// explicit, readable, zero magic. The poller calls onFinalized when
+	// a gameweek is fully persisted; the closure orchestrates stats
+	// computation and notification delivery.
 	//
 	// Go pattern — IMPLICIT INTERFACE SATISFACTION:
-	// *fpl.Client satisfies poller.FPLClient, and *store.PostgresStore
-	// satisfies store.Store — no cast or "implements" keyword needed.
-	// This is Go's structural typing in action.
+	// *fpl.Client satisfies poller.FPLClient, *store.PostgresStore
+	// satisfies both store.Store and stats.Store — no cast or
+	// "implements" keyword needed. This is Go's structural typing.
 	var onFinalized poller.OnGameweekFinalized
+
+	if cfg.TelegramConfigured {
+		statsEngine := stats.New(appStore, int64(cfg.FPLLeagueID))
+		tgNotifier := telegram.New(
+			&http.Client{Timeout: 10 * time.Second},
+			cfg.TelegramBotToken,
+			cfg.TelegramChatID,
+		)
+
+		onFinalized = func(ctx context.Context, eventID int) error {
+			alerts, err := statsEngine.BuildGameweekAlerts(ctx, eventID)
+			if err != nil {
+				return fmt.Errorf("build alerts for event %d: %w", eventID, err)
+			}
+			if len(alerts) == 0 {
+				slog.Info("no alerts to send", "event_id", eventID)
+				return nil
+			}
+			slog.Info("sending alerts", "event_id", eventID, "alert_count", len(alerts))
+			return tgNotifier.SendAlerts(ctx, alerts)
+		}
+
+		slog.Info("notification pipeline wired", "platform", "telegram")
+	}
 
 	p, err := poller.New(fplClient, appStore, pollerCfg, onFinalized)
 	if err != nil {

@@ -8,6 +8,11 @@
 *.so
 *.dylib
 
+# Go build output (Unix binaries have no extension — list each cmd/ name)
+bot
+backfill
+notify-test
+
 # Test binary, built with `go test -c`
 *.test
 
