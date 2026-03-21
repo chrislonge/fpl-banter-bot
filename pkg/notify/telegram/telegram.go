@@ -130,21 +130,34 @@ func (c *Client) sendMessage(ctx context.Context, text string) error {
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	// Cap response reads to prevent unbounded memory allocation from a
+	// misbehaving upstream proxy. Telegram responses are typically < 1KB.
+	const maxResponseBytes = 1 << 16 // 64KB
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return fmt.Errorf("reading response: %w", err)
 	}
 
-	// Parse the Telegram response envelope.
-	var tgResp telegramResponse
-	if err := json.Unmarshal(respBody, &tgResp); err != nil {
-		// If we can't parse the response, fall back to the HTTP status.
-		if resp.StatusCode != http.StatusOK {
+	// Check HTTP status first — a non-200 is always an error, regardless
+	// of what the JSON body says. This prevents a pathological case where
+	// a non-200 response contains parseable JSON with ok: true.
+	if resp.StatusCode != http.StatusOK {
+		var tgResp telegramResponse
+		if err := json.Unmarshal(respBody, &tgResp); err == nil && tgResp.Description != "" {
 			return &APIError{
 				StatusCode:  resp.StatusCode,
-				Description: string(respBody),
+				Description: tgResp.Description,
 			}
 		}
+		return &APIError{
+			StatusCode:  resp.StatusCode,
+			Description: string(respBody),
+		}
+	}
+
+	// Parse the Telegram response envelope for 200 responses.
+	var tgResp telegramResponse
+	if err := json.Unmarshal(respBody, &tgResp); err != nil {
 		return fmt.Errorf("parsing response: %w", err)
 	}
 

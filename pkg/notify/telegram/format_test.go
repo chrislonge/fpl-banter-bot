@@ -220,12 +220,9 @@ func TestFormatAlerts_HTMLEscaping(t *testing.T) {
 	if !strings.Contains(combined, "&lt;script&gt;") {
 		t.Error("expected escaped <script> tag in output")
 	}
-	if strings.Contains(combined, "Dave & Sons") {
-		// The raw & should be escaped to &amp;
-		// But "Dave & Sons" contains raw & — check it's escaped.
-		// Actually strings.Contains would match the escaped version too
-		// since &amp; contains &. Let's check for the raw pattern more precisely.
-	}
+	// Note: strings.Contains(combined, "Dave & Sons") would match even
+	// the escaped form "Dave &amp; Sons" because "&amp;" contains "&".
+	// So we only assert the positive case — the escaped form is present.
 	if !strings.Contains(combined, "Dave &amp; Sons") {
 		t.Error("expected & escaped to &amp; in output")
 	}
@@ -473,10 +470,6 @@ func TestFormatAlerts_JustBelowLimit(t *testing.T) {
 	}
 
 	// With 20 short results, this should fit in a single message.
-	totalLen := 0
-	for _, m := range msgs {
-		totalLen += len(m)
-	}
 	if len(msgs) == 1 && len(msgs[0]) > telegramMaxMessageLength {
 		t.Errorf("single message exceeds limit: %d chars", len(msgs[0]))
 	}

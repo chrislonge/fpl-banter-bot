@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/chrislonge/fpl-banter-bot/pkg/notify"
 )
@@ -139,7 +140,15 @@ func chunkMessages(header string, sections []string) []string {
 			if line == "" {
 				continue
 			}
-			candidate = current + "\n" + line
+
+			// Use \n\n after the header (matching Tier 1 separator),
+			// \n between subsequent lines within the section.
+			sep := "\n"
+			if current == header {
+				sep = "\n\n"
+			}
+
+			candidate = current + sep + line
 			if len(candidate) <= telegramMaxMessageLength {
 				current = candidate
 				continue
@@ -149,17 +158,18 @@ func chunkMessages(header string, sections []string) []string {
 			if current != header {
 				messages = append(messages, current)
 				current = header
+				sep = "\n\n"
 			}
 
-			// Tier 3: single line exceeds limit — truncate.
-			lineWithHeader := current + "\n" + line
+			// Tier 3: single line exceeds limit — truncate safely.
+			lineWithHeader := current + sep + line
 			if len(lineWithHeader) > telegramMaxMessageLength {
-				maxLineLen := telegramMaxMessageLength - len(current) - len("\n") - len("...")
+				maxLineLen := telegramMaxMessageLength - len(current) - len(sep) - len("...")
 				if maxLineLen > 0 {
-					line = line[:maxLineLen] + "..."
+					line = truncateUTF8(line, maxLineLen)
 				}
 			}
-			current = current + "\n" + line
+			current = current + sep + line
 		}
 	}
 
@@ -385,4 +395,22 @@ func chipDisplayName(chip string) string {
 	default:
 		return chip
 	}
+}
+
+// truncateUTF8 shortens s to at most maxBytes bytes without splitting
+// a multi-byte UTF-8 rune. It appends "..." to indicate truncation.
+//
+// A naive s[:maxBytes] can slice through the middle of a multi-byte
+// character (e.g., an emoji is 4 bytes), producing invalid UTF-8.
+// This function walks backward from the cut point to find a clean
+// rune boundary.
+func truncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	// Walk backward from maxBytes until we find a valid rune start.
+	for maxBytes > 0 && !utf8.RuneStart(s[maxBytes]) {
+		maxBytes--
+	}
+	return s[:maxBytes] + "..."
 }
