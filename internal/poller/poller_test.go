@@ -82,12 +82,12 @@ func (f *fakeFPLClient) GetAllH2HMatches(_ context.Context, _ int, eventID int) 
 		return fpl.H2HMatchesResponse{
 			Results: []fpl.H2HMatch{
 				{
-					ID:          eventID,
-					League:      f.standings.League.ID,
-					Event:       eventID,
-					Entry1Entry: f.standings.Standings.Results[0].EntryID,
+					ID:           eventID,
+					League:       f.standings.League.ID,
+					Event:        eventID,
+					Entry1Entry:  f.standings.Standings.Results[0].EntryID,
 					Entry1Points: 55,
-					Entry2Entry: f.standings.Standings.Results[1].EntryID,
+					Entry2Entry:  f.standings.Standings.Results[1].EntryID,
 					Entry2Points: 48,
 				},
 			},
@@ -187,6 +187,9 @@ func (f *fakeStore) GetChipUsage(context.Context, int64, int) ([]store.ChipUsage
 	panic("not implemented")
 }
 func (f *fakeStore) GetH2HResults(context.Context, int64, int) ([]store.H2HResult, error) {
+	panic("not implemented")
+}
+func (f *fakeStore) GetH2HResultsRange(context.Context, int64, int, int) ([]store.H2HResult, error) {
 	panic("not implemented")
 }
 func (f *fakeStore) GetManagers(context.Context, int64) ([]store.Manager, error) {
@@ -295,12 +298,12 @@ func TestNew_AcceptsH2H(t *testing.T) {
 
 func TestTick(t *testing.T) {
 	tests := []struct {
-		name           string
-		setup          func(fc *fakeFPLClient, fs *fakeStore, p *Poller)
-		onFinalized    func(context.Context, int) error // if non-nil, used as the callback
-		wantState      State
-		wantFinalized  bool // whether finalization should have occurred
-		wantErrSubstr  string
+		name          string
+		setup         func(fc *fakeFPLClient, fs *fakeStore, p *Poller)
+		onFinalized   func(context.Context, int) error // if non-nil, used as the callback
+		wantState     State
+		wantFinalized bool // whether finalization should have occurred
+		wantErrSubstr string
 	}{
 		{
 			name: "idle when no current event",
@@ -480,6 +483,18 @@ func TestTick(t *testing.T) {
 			},
 			wantState:     StateIdle,
 			wantErrSubstr: "event status",
+		},
+		{
+			name: "game updating during event status keeps state processing without error",
+			setup: func(fc *fakeFPLClient, _ *fakeStore, _ *Poller) {
+				fc.bootstrap = fpl.BootstrapResponse{
+					Events: []fpl.Event{
+						{ID: 5, IsCurrent: true, Finished: true, DeadlineTime: pastDeadline()},
+					},
+				}
+				fc.eventStatusErr = fpl.ErrGameUpdating
+			},
+			wantState: StateProcessing,
 		},
 		{
 			name: "finalization failure keeps state processing and does not advance guard",

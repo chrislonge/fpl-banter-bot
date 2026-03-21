@@ -60,6 +60,7 @@ type Store interface {
 	GetStandings(ctx context.Context, leagueID int64, eventID int) ([]GameweekStanding, error)
 	GetChipUsage(ctx context.Context, leagueID int64, eventID int) ([]ChipUsage, error)
 	GetH2HResults(ctx context.Context, leagueID int64, eventID int) ([]H2HResult, error)
+	GetH2HResultsRange(ctx context.Context, leagueID int64, fromEvent int, toEvent int) ([]H2HResult, error)
 	GetManagers(ctx context.Context, leagueID int64) ([]Manager, error)
 	GetLeague(ctx context.Context, leagueID int64) (League, error)
 	GetLatestEventID(ctx context.Context, leagueID int64) (int, error)
@@ -276,6 +277,24 @@ func (s *PostgresStore) GetChipUsage(ctx context.Context, leagueID int64, eventI
 
 func (s *PostgresStore) GetH2HResults(ctx context.Context, leagueID int64, eventID int) ([]H2HResult, error) {
 	rows, err := s.pool.Query(ctx, getH2HResults, leagueID, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []H2HResult
+	for rows.Next() {
+		var r H2HResult
+		if err := rows.Scan(&r.LeagueID, &r.EventID, &r.Manager1ID, &r.Manager1Score, &r.Manager2ID, &r.Manager2Score, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func (s *PostgresStore) GetH2HResultsRange(ctx context.Context, leagueID int64, fromEvent int, toEvent int) ([]H2HResult, error) {
+	rows, err := s.pool.Query(ctx, getH2HResultsRange, leagueID, fromEvent, toEvent)
 	if err != nil {
 		return nil, err
 	}

@@ -116,6 +116,13 @@ const getH2HResults = `
 	ORDER BY manager_1_id, manager_2_id
 `
 
+const getH2HResultsRange = `
+	SELECT league_id, event_id, manager_1_id, manager_1_score, manager_2_id, manager_2_score, created_at
+	FROM h2h_results
+	WHERE league_id = $1 AND event_id BETWEEN $2 AND $3
+	ORDER BY event_id, manager_1_id, manager_2_id
+`
+
 const getStoredEventIDs = `
 	SELECT DISTINCT event_id
 	FROM gameweek_standings

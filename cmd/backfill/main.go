@@ -19,6 +19,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -99,6 +100,12 @@ func main() {
 
 	// Run backfill — this blocks until complete or context cancellation.
 	if err := p.Backfill(ctx); err != nil {
+		if errors.Is(err, fpl.ErrGameUpdating) {
+			slog.Warn("backfill paused because the FPL API is temporarily updating; try again once the game is available",
+				"error", err,
+			)
+			os.Exit(1)
+		}
 		slog.Error("backfill failed", "error", err)
 		os.Exit(1)
 	}

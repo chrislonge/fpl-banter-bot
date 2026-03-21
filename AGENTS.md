@@ -23,6 +23,13 @@ Definition of done for an implementation session:
 - update `LEARNING_JOURNAL.md` with the Go, API, testing, or architecture
   lessons from the session
 
+Private local docs:
+- `PROJECT_PLAN.md` and `LEARNING_JOURNAL.md` are private, gitignored working
+  documents and should not be treated as public repo content in summaries,
+  PR descriptions, or review comments
+- both files are symlinks; update them in place when needed, but avoid treating
+  their contents as shareable project artifacts
+
 Reviewability:
 - mention which files changed
 - describe how to verify the work locally

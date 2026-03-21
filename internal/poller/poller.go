@@ -2,6 +2,7 @@ package poller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -212,7 +213,14 @@ func (p *Poller) Run(ctx context.Context) error {
 		if err := p.tick(ctx); err != nil {
 			// Log but don't exit — transient FPL API errors should not
 			// kill the bot. The poller will retry on the next tick.
-			p.logger.Error("tick failed", "error", err, "state", p.state)
+			if errors.Is(err, fpl.ErrGameUpdating) {
+				p.logger.Warn("fpl API temporarily unavailable while the game updates",
+					"error", err,
+					"state", p.state,
+				)
+			} else {
+				p.logger.Error("tick failed", "error", err, "state", p.state)
+			}
 		}
 
 		interval := p.intervalForState()
@@ -298,6 +306,13 @@ func (p *Poller) tick(ctx context.Context) error {
 	// an unnecessary API call in those states.
 	status, err := p.fpl.GetEventStatus(ctx)
 	if err != nil {
+		if errors.Is(err, fpl.ErrGameUpdating) {
+			p.transition(StateProcessing)
+			p.logger.Info("fpl API reports the game is updating; staying in processing and retrying",
+				"event_id", event.ID,
+			)
+			return nil
+		}
 		return fmt.Errorf("fetching event status: %w", err)
 	}
 

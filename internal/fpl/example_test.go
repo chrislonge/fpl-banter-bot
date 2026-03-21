@@ -34,6 +34,7 @@ package fpl_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -55,6 +56,17 @@ func skipUnlessLive(t *testing.T) {
 	}
 }
 
+func requireLiveResponse(t *testing.T, op string, err error) {
+	t.Helper()
+	if err == nil {
+		return
+	}
+	if errors.Is(err, fpl.ErrGameUpdating) {
+		t.Skipf("%s skipped because the FPL API is temporarily returning the game-updating banner: %v", op, err)
+	}
+	t.Fatalf("%s: %v", op, err)
+}
+
 func TestLiveAPI_Bootstrap(t *testing.T) {
 	skipUnlessLive(t)
 
@@ -63,9 +75,7 @@ func TestLiveAPI_Bootstrap(t *testing.T) {
 
 	client := fpl.NewClient(liveBaseURL, nil)
 	resp, err := client.GetBootstrap(ctx)
-	if err != nil {
-		t.Fatalf("GetBootstrap: %v", err)
-	}
+	requireLiveResponse(t, "GetBootstrap", err)
 
 	t.Logf("Events: %d, Teams: %d", len(resp.Events), len(resp.Teams))
 
@@ -93,9 +103,7 @@ func TestLiveAPI_EventStatus(t *testing.T) {
 
 	client := fpl.NewClient(liveBaseURL, nil)
 	resp, err := client.GetEventStatus(ctx)
-	if err != nil {
-		t.Fatalf("GetEventStatus: %v", err)
-	}
+	requireLiveResponse(t, "GetEventStatus", err)
 
 	t.Logf("Leagues: %q, Status entries: %d", resp.Leagues, len(resp.Status))
 
@@ -115,9 +123,7 @@ func TestLiveAPI_H2HStandings(t *testing.T) {
 
 	// Use the Capital FC league from the project plan.
 	resp, err := client.GetAllH2HStandings(ctx, 916670)
-	if err != nil {
-		t.Fatalf("GetAllH2HStandings: %v", err)
-	}
+	requireLiveResponse(t, "GetAllH2HStandings", err)
 
 	t.Logf("League: %q (ID=%d), Managers: %d",
 		resp.League.Name, resp.League.ID, len(resp.Standings.Results))
@@ -139,9 +145,7 @@ func TestLiveAPI_ManagerHistory(t *testing.T) {
 
 	// First, fetch the league to get a real manager ID.
 	standings, err := client.GetH2HStandings(ctx, 916670, 1)
-	if err != nil {
-		t.Fatalf("GetH2HStandings: %v", err)
-	}
+	requireLiveResponse(t, "GetH2HStandings", err)
 	if len(standings.Standings.Results) == 0 {
 		t.Fatal("no managers found in league")
 	}
@@ -151,9 +155,7 @@ func TestLiveAPI_ManagerHistory(t *testing.T) {
 		managerID, standings.Standings.Results[0].PlayerName)
 
 	resp, err := client.GetManagerHistory(ctx, managerID)
-	if err != nil {
-		t.Fatalf("GetManagerHistory: %v", err)
-	}
+	requireLiveResponse(t, "GetManagerHistory", err)
 
 	t.Logf("Gameweeks played: %d, Chips used: %d", len(resp.Current), len(resp.Chips))
 
@@ -175,9 +177,7 @@ func TestLiveAPI_H2HMatches(t *testing.T) {
 	client := fpl.NewClient(liveBaseURL, nil)
 
 	resp, err := client.GetAllH2HMatches(ctx, 916670, 1)
-	if err != nil {
-		t.Fatalf("GetAllH2HMatches: %v", err)
-	}
+	requireLiveResponse(t, "GetAllH2HMatches", err)
 
 	t.Logf("Matches returned: %d", len(resp.Results))
 	for i, match := range resp.Results {
