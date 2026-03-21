@@ -3,7 +3,7 @@
 -include .env
 export
 
-.PHONY: build test test-store test-all lint run backfill db-up db-down db-reset
+.PHONY: build test test-store test-telegram test-all lint run backfill notify-test db-up db-down db-reset
 
 ## Build the bot binary
 build:
@@ -21,6 +21,10 @@ test-store:
 test-all:
 	STORE_TEST_DATABASE_URL=$(STORE_TEST_DATABASE_URL) go test ./... -v
 
+## Telegram integration test (requires TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID)
+test-telegram:
+	go test ./pkg/notify/telegram/ -run TestIntegration -v
+
 ## Run the linter
 lint:
 	golangci-lint run
@@ -32,6 +36,13 @@ run:
 ## Backfill historical gameweeks (one-time operation)
 backfill:
 	go run cmd/backfill/main.go
+
+## Test the full stats → notify pipeline with real DB data (requires Postgres + Telegram)
+## Usage: make notify-test              (latest gameweek)
+##        make notify-test GW=12        (specific gameweek)
+##        make notify-test DRY_RUN=1    (preview without sending)
+notify-test:
+	go run cmd/notify-test/main.go
 
 ## Start the database
 db-up:
