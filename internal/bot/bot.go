@@ -283,6 +283,12 @@ func (h *Handler) handleUpdate(ctx context.Context, upd update) {
 	command := strings.ToLower(strings.SplitN(parts[0], "@", 2)[0])
 	args := parts[1:]
 
+	slog.Debug("webhook received command",
+		"update_id", upd.UpdateID,
+		"chat_id", upd.Message.Chat.ID,
+		"command", command,
+		"args", args)
+
 	response, err := h.dispatchCommand(ctx, command, args)
 	if err != nil {
 		slog.Warn("command error", "command", command, "error", err)

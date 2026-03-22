@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 )
 
@@ -51,6 +52,10 @@ func (h *Handler) serveWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+
+	slog.Debug("webhook POST received",
+		"update_id", upd.UpdateID,
+		"has_message", upd.Message != nil)
 
 	// Ack before any processing — Telegram expects a response within 5s.
 	w.WriteHeader(http.StatusOK)
