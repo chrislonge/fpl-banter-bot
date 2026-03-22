@@ -175,7 +175,7 @@ func (h *Handler) RunServer(ctx context.Context) error {
 	if err := h.tg.SetWebhook(ctx, h.webhookURL); err != nil {
 		return fmt.Errorf("registering webhook %s: %w", h.webhookURL, err)
 	}
-	slog.Info("webhook registered", "url", h.webhookURL)
+	slog.Info("webhook registered")
 
 	// Go pattern — PATH-BASED SECRET:
 	//

@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 )
 
@@ -35,11 +36,18 @@ func (h *Handler) serveWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Cap the request body to 1MB to prevent OOM from oversized POSTs.
-	// http.MaxBytesReader returns a 413 automatically if the limit is exceeded.
+	// MaxBytesReader wraps r.Body so that reads beyond the limit fail
+	// with *http.MaxBytesError — we detect that below to return 413.
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var upd update
 	if err := json.NewDecoder(r.Body).Decode(&upd); err != nil {
+		// Distinguish "body too large" from "malformed JSON."
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}

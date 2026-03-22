@@ -175,7 +175,7 @@ func resolveManager(arg string, managers []store.Manager, standings []store.Game
 	default:
 		names := make([]string, len(matches))
 		for i, m := range matches {
-			names[i] = esc(m.Name)
+			names[i] = m.Name
 		}
 		return store.Manager{}, fmt.Errorf("ambiguous: matches %s", strings.Join(names, ", "))
 	}

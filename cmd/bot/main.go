@@ -218,8 +218,7 @@ func main() {
 	g.Go(func() error { return p.Run(gctx) })
 
 	if cfg.TelegramConfigured {
-		webhookURL := cfg.WebhookBaseURL + "/webhook/" + cfg.WebhookSecret
-		slog.Info("webhook URL", "url", webhookURL)
+		slog.Info("webhook configured", "base_url", cfg.WebhookBaseURL)
 
 		// Wire the bot server with all its dependencies.
 		//

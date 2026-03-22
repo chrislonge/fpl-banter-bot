@@ -68,10 +68,19 @@ func formatStandings(eventID int, standings []store.GameweekStanding, managers [
 		if len(name) > 18 {
 			name = truncateUTF8(name, 15)
 		}
-		// HTML-escape manager names — names containing <, >, or &
-		// would break the surrounding <pre> block.
-		b.WriteString(fmt.Sprintf("\n%-4s %-18s %4d %5d",
-			ordinal(s.Rank), esc(name), s.Points, s.TotalScore))
+		// Compute padding based on the unescaped display name so that
+		// HTML entities like "&amp;" don't inflate Go's width calculation
+		// and misalign columns in Telegram's monospace rendering.
+		const managerColWidth = 18
+		displayWidth := utf8.RuneCountInString(name)
+		if displayWidth > managerColWidth {
+			displayWidth = managerColWidth
+		}
+		padding := managerColWidth - displayWidth
+		escapedName := esc(name)
+
+		b.WriteString(fmt.Sprintf("\n%-4s %s%s %4d %5d",
+			ordinal(s.Rank), escapedName, strings.Repeat(" ", padding), s.Points, s.TotalScore))
 	}
 
 	b.WriteString("</pre>")
