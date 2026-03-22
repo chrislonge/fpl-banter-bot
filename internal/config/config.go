@@ -94,7 +94,7 @@ func Load() (Config, error) {
 	// needs a publicly reachable URL to register with the Telegram API.
 	// Without this, Telegram has nowhere to deliver command updates.
 	if telegramConfigured && webhookBaseURL == "" {
-		return Config{}, fmt.Errorf("WEBHOOK_BASE_URL is required when TELEGRAM_BOT_TOKEN is set")
+		return Config{}, fmt.Errorf("WEBHOOK_BASE_URL is required when Telegram is configured")
 	}
 
 	// Auto-generate a webhook secret if not provided.

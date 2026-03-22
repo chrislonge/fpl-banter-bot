@@ -55,10 +55,18 @@ func TestServeWebhook_ValidUpdate(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 
-	// Give the background goroutine time to complete.
-	time.Sleep(100 * time.Millisecond)
-
-	sent := tg.sentMessages()
+	// Poll for the background goroutine to complete instead of using a
+	// fixed sleep. This is more reliable than time.Sleep(100ms) which
+	// can flake on slow CI runners.
+	deadline := time.Now().Add(2 * time.Second)
+	var sent []sentMessage
+	for time.Now().Before(deadline) {
+		sent = tg.sentMessages()
+		if len(sent) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if len(sent) != 1 {
 		t.Fatalf("expected 1 send, got %d", len(sent))
 	}

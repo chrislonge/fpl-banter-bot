@@ -82,12 +82,12 @@ func handleHistory(ctx context.Context, sq StatsQuerier, s LeagueStore, leagueID
 
 	managerA, err := resolveManager(args[0], managers, standings)
 	if err != nil {
-		return fmt.Sprintf("Could not resolve %q: %s", args[0], err.Error()), nil
+		return fmt.Sprintf("Could not resolve %q: %s", esc(args[0]), esc(err.Error())), nil
 	}
 
 	managerB, err := resolveManager(args[1], managers, standings)
 	if err != nil {
-		return fmt.Sprintf("Could not resolve %q: %s", args[1], err.Error()), nil
+		return fmt.Sprintf("Could not resolve %q: %s", esc(args[1]), esc(err.Error())), nil
 	}
 
 	if managerA.ID == managerB.ID {
@@ -175,7 +175,7 @@ func resolveManager(arg string, managers []store.Manager, standings []store.Game
 	default:
 		names := make([]string, len(matches))
 		for i, m := range matches {
-			names[i] = m.Name
+			names[i] = esc(m.Name)
 		}
 		return store.Manager{}, fmt.Errorf("ambiguous: matches %s", strings.Join(names, ", "))
 	}

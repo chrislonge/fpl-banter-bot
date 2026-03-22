@@ -11,6 +11,7 @@ import (
 	"html"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	// Go pattern — BLANK IMPORT FOR SIDE EFFECTS:
 	//
@@ -62,11 +63,15 @@ func formatStandings(eventID int, standings []store.GameweekStanding, managers [
 			name = fmt.Sprintf("ID:%d", s.ManagerID)
 		}
 		// Truncate long names to keep the table aligned.
+		// Use truncateUTF8 instead of name[:15] to avoid slicing
+		// through multi-byte runes (e.g., accented characters, emoji).
 		if len(name) > 18 {
-			name = name[:15] + "..."
+			name = truncateUTF8(name, 15)
 		}
+		// HTML-escape manager names — names containing <, >, or &
+		// would break the surrounding <pre> block.
 		b.WriteString(fmt.Sprintf("\n%-4s %-18s %4d %5d",
-			ordinal(s.Rank), name, s.Points, s.TotalScore))
+			ordinal(s.Rank), esc(name), s.Points, s.TotalScore))
 	}
 
 	b.WriteString("</pre>")
@@ -155,6 +160,22 @@ func formatDeadline(name string, t time.Time) string {
 // notifier package (Architecture Rule #2 from CLAUDE.md).
 func esc(s string) string {
 	return html.EscapeString(s)
+}
+
+// truncateUTF8 shortens s to at most maxBytes bytes without splitting
+// a multi-byte UTF-8 rune. It appends "..." to indicate truncation.
+//
+// This is a local copy of the same helper in pkg/notify/telegram/format.go.
+// Duplicating a small function is preferable to coupling internal/bot to
+// the telegram package (Architecture Rule #2 from CLAUDE.md).
+func truncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	for maxBytes > 0 && !utf8.RuneStart(s[maxBytes]) {
+		maxBytes--
+	}
+	return s[:maxBytes] + "..."
 }
 
 // ordinal returns the English ordinal for a rank (1st, 2nd, 3rd, etc.).

@@ -34,6 +34,10 @@ func (h *Handler) serveWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Cap the request body to 1MB to prevent OOM from oversized POSTs.
+	// http.MaxBytesReader returns a 413 automatically if the limit is exceeded.
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
 	var upd update
 	if err := json.NewDecoder(r.Body).Decode(&upd); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)

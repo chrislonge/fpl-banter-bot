@@ -224,6 +224,16 @@ func (h *Handler) RunServer(ctx context.Context) error {
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
+
+		// Best-effort webhook cleanup — if the server failed (e.g., port
+		// in use), the registered webhook points at a dead endpoint.
+		// Deregister it so Telegram stops sending retries into the void.
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if delErr := h.tg.DeleteWebhook(cleanupCtx); delErr != nil {
+			slog.Warn("deleteWebhook failed after server error", "error", delErr)
+		}
+
 		return fmt.Errorf("webhook server: %w", err)
 	}
 }
