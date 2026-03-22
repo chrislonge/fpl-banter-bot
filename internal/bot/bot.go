@@ -182,7 +182,7 @@ func (h *Handler) RunServer(ctx context.Context) error {
 	// The webhook path includes the secret token: /webhook/<secret>.
 	// Any request to a different path gets an automatic 404 from the mux.
 	// This is simpler than the X-Telegram-Bot-Api-Secret-Token header
-	// approach and is what PROJECT_PLAN.md specifies.
+	// approach and is the recommended Telegram webhook pattern.
 	mux := http.NewServeMux()
 	mux.HandleFunc("/webhook/"+h.webhookSecret, h.serveWebhook)
 	mux.HandleFunc("/health", h.serveHealth)

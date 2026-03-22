@@ -19,16 +19,11 @@ Working style for this repo:
 Definition of done for an implementation session:
 - update or add tests for the changed behavior
 - run `go test ./...`
-- update `PROJECT_PLAN.md` with the current plan and progress
-- update `LEARNING_JOURNAL.md` with the Go, API, testing, or architecture
-  lessons from the session
 
 Private local docs:
-- `PROJECT_PLAN.md` and `LEARNING_JOURNAL.md` are private, gitignored working
-  documents and should not be treated as public repo content in summaries,
-  PR descriptions, or review comments
-- both files are symlinks; update them in place when needed, but avoid treating
-  their contents as shareable project artifacts
+- `LEARNING_JOURNAL.md` and other private planning documents are gitignored
+  working documents and should not be treated as public repo content in
+  summaries, PR descriptions, or review comments
 
 Reviewability:
 - mention which files changed

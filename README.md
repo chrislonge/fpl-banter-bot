@@ -47,7 +47,7 @@ flowchart TB
 
     subgraph Infrastructure
         PG[("PostgreSQL")]
-        TUNNEL["Tunnel\n(ngrok / cloudflared)"]
+        TUNNEL["Tailscale Funnel\n(webhook reachability)"]
     end
 
     %% Proactive path
@@ -152,17 +152,20 @@ The bot supports two operating modes, controlled by whether Telegram credentials
 
 Data-collection-only mode is useful for building up historical data before enabling notifications, or for running the bot purely as a data pipeline. Setting only one of `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` is treated as a misconfiguration and the bot will refuse to start.
 
-**Full mode requires a publicly reachable HTTPS URL** so Telegram can deliver webhook updates. Use [ngrok](https://ngrok.com/) or [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) to expose port 8080:
+**Full mode requires a publicly reachable HTTPS URL** so Telegram can deliver webhook updates. [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel) is the recommended approach — it provides a stable `*.ts.net` URL with automatic TLS, no port forwarding, and works well on both dev machines and Raspberry Pi deployments:
 
 ```bash
-# ngrok
-ngrok http 8080
-# → set WEBHOOK_BASE_URL=https://xxxxx.ngrok.io in .env
-
-# cloudflared (free, no account needed for a temporary tunnel)
-cloudflared tunnel --url http://localhost:8080
-# → set WEBHOOK_BASE_URL=https://xxxxx.trycloudflare.com in .env
+# Tailscale Funnel (recommended)
+tailscale funnel 8080
+# → set WEBHOOK_BASE_URL=https://your-machine.tail<id>.ts.net in .env
 ```
+
+Other tunnel options ([ngrok](https://ngrok.com/), [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)) also work — any tool that gives you a public HTTPS URL proxying to `localhost:8080` is sufficient.
+
+> **Tailscale Funnel setup notes:**
+> - Requires the **standalone** Tailscale install (not App Store on macOS — the sandbox blocks Funnel).
+> - MagicDNS, HTTPS certificates, and the `funnel` node attribute must be enabled in the Tailscale admin console.
+> - **Rename your machine** to something neutral before enabling HTTPS — machine names are permanently recorded in public [Certificate Transparency](https://certificate.transparency.dev/) logs.
 
 On startup the bot registers its webhook URL with Telegram and deregisters it on clean shutdown.
 
@@ -191,7 +194,7 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 | `FPL_LEAGUE_TYPE` | No | `h2h` or `classic` (default: `h2h`) |
 | `TELEGRAM_BOT_TOKEN` | No | Token from @BotFather (omit for data-collection-only mode) |
 | `TELEGRAM_CHAT_ID` | No | Target group chat ID (omit for data-collection-only mode) |
-| `WEBHOOK_BASE_URL` | When Telegram is set | Public HTTPS URL for Telegram to deliver updates (e.g. your ngrok URL, no trailing slash) |
+| `WEBHOOK_BASE_URL` | When Telegram is set | Public HTTPS URL for Telegram to deliver updates (e.g. your Tailscale Funnel `*.ts.net` URL, no trailing slash) |
 | `WEBHOOK_PORT` | No | Local port for the HTTP server (default: `8080`) |
 | `WEBHOOK_SECRET` | No | Secret path component for webhook URL security (auto-generated if omitted) |
 | `DATABASE_URL` | Yes | Postgres connection string |
@@ -344,7 +347,7 @@ migrate -path internal/store/migrations -database "$DATABASE_URL" down 1
 
 - **H2H leagues only** — classic league support is planned but not yet implemented. The bot fails fast on startup if `FPL_LEAGUE_TYPE` is not `h2h`.
 - **Backfill standings are synthetic** — see the [backfill section](#4-backfill-historical-gameweeks-optional) for details on this FPL API limitation.
-- **Webhook requires a public URL** — in full mode, a tunnel (ngrok, Cloudflare) is needed for local development. In production, the bot's host must be publicly reachable over HTTPS.
+- **Webhook requires a public URL** — in full mode, a tunnel (Tailscale Funnel, ngrok, or Cloudflare Tunnel) is needed. The bot's host must be publicly reachable over HTTPS for Telegram to deliver webhook updates.
 
 ## License
 
