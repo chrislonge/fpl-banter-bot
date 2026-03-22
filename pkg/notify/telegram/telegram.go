@@ -107,10 +107,24 @@ func (c *Client) SendAlerts(ctx context.Context, alerts []notify.Alert) error {
 	return nil
 }
 
-// sendMessage POSTs a single message to the Telegram Bot API.
+// sendMessage POSTs a single message to the configured chat ID.
+//
+// Go pattern — DELEGATE TO PARAMETERIZED HELPER:
+//
+// sendMessage wraps sendMessageTo with the pre-configured chatID. This
+// keeps the proactive alert path (SendAlerts → sendMessage) unchanged while
+// enabling the reactive command path (SendRaw → sendMessageTo) to target
+// an arbitrary chat. In Swift this would be a convenience method with a
+// default parameter; Go doesn't have default parameters, so a one-liner
+// wrapper is the idiomatic equivalent.
 func (c *Client) sendMessage(ctx context.Context, text string) error {
+	return c.sendMessageTo(ctx, c.chatID, text)
+}
+
+// sendMessageTo POSTs a single HTML-formatted message to an arbitrary chat.
+func (c *Client) sendMessageTo(ctx context.Context, chatID, text string) error {
 	body, err := json.Marshal(sendMessageRequest{
-		ChatID:    c.chatID,
+		ChatID:    chatID,
 		Text:      text,
 		ParseMode: "HTML",
 	})
@@ -166,6 +180,114 @@ func (c *Client) sendMessage(ctx context.Context, text string) error {
 			StatusCode:  resp.StatusCode,
 			Description: tgResp.Description,
 		}
+	}
+
+	return nil
+}
+
+// SendRaw sends an HTML-formatted message to an arbitrary chat. This is the
+// public entry point used by the bot command handler (via the TelegramBot
+// interface) for reactive command replies.
+//
+// Unlike SendAlerts (which formats structured alerts), SendRaw sends
+// pre-formatted text as-is — the bot command layer owns its own formatting.
+func (c *Client) SendRaw(ctx context.Context, chatID, text string) error {
+	return c.sendMessageTo(ctx, chatID, text)
+}
+
+// setWebhookRequest is the JSON body for the Telegram setWebhook API.
+type setWebhookRequest struct {
+	URL                string `json:"url"`
+	DropPendingUpdates bool   `json:"drop_pending_updates"`
+}
+
+// SetWebhook registers a webhook URL with Telegram and clears any pending
+// updates queued while the bot was offline.
+//
+// The drop_pending_updates=true flag is critical for operational correctness:
+// without it, restarting the bot after a long outage floods the group chat
+// with stale command replies. This is called once on startup from RunServer.
+func (c *Client) SetWebhook(ctx context.Context, url string) error {
+	body, err := json.Marshal(setWebhookRequest{
+		URL:                url,
+		DropPendingUpdates: true,
+	})
+	if err != nil {
+		return fmt.Errorf("marshalling setWebhook request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL+"/setWebhook", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("creating setWebhook request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("calling setWebhook: %w", err)
+	}
+	defer resp.Body.Close()
+
+	const maxResponseBytes = 1 << 16
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return fmt.Errorf("reading setWebhook response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var tgResp telegramResponse
+		if err := json.Unmarshal(respBody, &tgResp); err == nil && tgResp.Description != "" {
+			return &APIError{StatusCode: resp.StatusCode, Description: tgResp.Description}
+		}
+		return &APIError{StatusCode: resp.StatusCode, Description: string(respBody)}
+	}
+
+	var tgResp telegramResponse
+	if err := json.Unmarshal(respBody, &tgResp); err != nil {
+		return fmt.Errorf("parsing setWebhook response: %w", err)
+	}
+	if !tgResp.OK {
+		return &APIError{StatusCode: resp.StatusCode, Description: tgResp.Description}
+	}
+
+	return nil
+}
+
+// DeleteWebhook deregisters the webhook on graceful shutdown so Telegram
+// stops sending updates to the now-unreachable URL. This is best-effort —
+// if it fails, Telegram will eventually time out and stop retrying.
+func (c *Client) DeleteWebhook(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL+"/deleteWebhook", nil)
+	if err != nil {
+		return fmt.Errorf("creating deleteWebhook request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("calling deleteWebhook: %w", err)
+	}
+	defer resp.Body.Close()
+
+	const maxResponseBytes = 1 << 16
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return fmt.Errorf("reading deleteWebhook response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var tgResp telegramResponse
+		if err := json.Unmarshal(respBody, &tgResp); err == nil && tgResp.Description != "" {
+			return &APIError{StatusCode: resp.StatusCode, Description: tgResp.Description}
+		}
+		return &APIError{StatusCode: resp.StatusCode, Description: string(respBody)}
+	}
+
+	var tgResp telegramResponse
+	if err := json.Unmarshal(respBody, &tgResp); err != nil {
+		return fmt.Errorf("parsing deleteWebhook response: %w", err)
+	}
+	if !tgResp.OK {
+		return &APIError{StatusCode: resp.StatusCode, Description: tgResp.Description}
 	}
 
 	return nil

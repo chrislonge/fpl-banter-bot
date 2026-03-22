@@ -4,6 +4,7 @@
 package config
 
 import (
+	"crypto/rand"
 	"fmt"
 	"os"
 	"strconv"
@@ -21,6 +22,11 @@ type Config struct {
 	TelegramBotToken   string
 	TelegramChatID     string
 	TelegramConfigured bool // true when both Telegram vars are present
+
+	// Webhook settings (required when Telegram is configured)
+	WebhookBaseURL string // e.g., "https://example.ngrok.io"
+	WebhookPort    int    // default 8080
+	WebhookSecret  string // auto-generated if absent
 
 	// Database
 	DatabaseURL string
@@ -77,12 +83,44 @@ func Load() (Config, error) {
 		)
 	}
 
+	telegramConfigured := botToken != "" && chatID != ""
+
+	// Read webhook settings.
+	webhookBaseURL := os.Getenv("WEBHOOK_BASE_URL")
+	webhookPort := getEnvAsIntOrDefault("WEBHOOK_PORT", 8080)
+	webhookSecret := os.Getenv("WEBHOOK_SECRET")
+
+	// WEBHOOK_BASE_URL is required when Telegram is configured — the bot
+	// needs a publicly reachable URL to register with the Telegram API.
+	// Without this, Telegram has nowhere to deliver command updates.
+	if telegramConfigured && webhookBaseURL == "" {
+		return Config{}, fmt.Errorf("WEBHOOK_BASE_URL is required when Telegram is configured")
+	}
+
+	// Auto-generate a webhook secret if not provided.
+	//
+	// Go pattern — crypto/rand FOR SECRETS:
+	//
+	// crypto/rand reads from the OS's cryptographic random source (/dev/urandom
+	// on Linux). math/rand is deterministic and unsuitable for secrets. The 16
+	// random bytes formatted as hex produce a 32-character URL-safe token.
+	if telegramConfigured && webhookSecret == "" {
+		b := make([]byte, 16)
+		if _, err := rand.Read(b); err != nil {
+			return Config{}, fmt.Errorf("generating webhook secret: %w", err)
+		}
+		webhookSecret = fmt.Sprintf("%x", b)
+	}
+
 	return Config{
 		FPLLeagueID:            leagueID,
 		FPLLeagueType:          getEnvOrDefault("FPL_LEAGUE_TYPE", "h2h"),
 		TelegramBotToken:       botToken,
 		TelegramChatID:         chatID,
-		TelegramConfigured:     botToken != "" && chatID != "",
+		TelegramConfigured:     telegramConfigured,
+		WebhookBaseURL:         webhookBaseURL,
+		WebhookPort:            webhookPort,
+		WebhookSecret:          webhookSecret,
 		DatabaseURL:            dbURL,
 		PollIdleInterval:       getEnvAsIntOrDefault("POLL_IDLE_INTERVAL", 21600),
 		PollLiveInterval:       getEnvAsIntOrDefault("POLL_LIVE_INTERVAL", 900),
