@@ -1,6 +1,6 @@
 # fpl-banter-bot
 
-> **Status:** Phase 1 complete — the proactive alert pipeline is fully wired. The bot polls the FPL API, detects gameweek finalization, computes banter-worthy stats, and posts formatted alerts to Telegram automatically. Reactive commands (Phase 1.7) are next.
+> **Status:** Phase 1 complete — the full pipeline is wired. The bot polls the FPL API, posts gameweek alerts automatically, and responds to Telegram commands (`/standings`, `/streak`, `/history`, `/deadline`).
 
 A self-hosted bot that tracks your Fantasy Premier League mini-league and posts banter-worthy stats to your group chat after each gameweek. Built in Go, runs on a Raspberry Pi.
 
@@ -16,42 +16,58 @@ The bot watches your H2H mini-league via the FPL API and automatically detects i
 
 No manual checking required. Alerts are posted to your group chat automatically.
 
+Group members can also query the bot directly:
+
+- `/standings` — current league table
+- `/streak` — active win/loss streaks
+- `/history <manager1> <manager2>` — head-to-head record between two managers (by rank or name prefix)
+- `/deadline` — next gameweek deadline in London time
+
 ## Architecture
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph External
         FPL["FPL API\n(fantasy.premierleague.com)"]
         TG["Telegram Bot API"]
+        USER["Telegram User\n(/commands)"]
     end
 
     subgraph "fpl-banter-bot"
         direction TB
-        MAIN["cmd/bot/main.go\nEntrypoint + graceful shutdown"]
+        MAIN["cmd/bot/main.go\nEntrypoint + errgroup shutdown"]
         CONFIG["config\nEnv vars"]
         CLIENT["fpl.Client\nHTTP client"]
         STORE["store.Store\nPostgres persistence"]
         POLLER["poller\nIdle → Live → Processing"]
         STATS["stats.Engine\nDiff + alert detection"]
         NOTIFY["notify.Notifier\nChat platform interface"]
+        BOT["bot.Handler\nWebhook + command router\n/health endpoint"]
     end
 
     subgraph Infrastructure
         PG[("PostgreSQL")]
+        TUNNEL["Tunnel\n(ngrok / cloudflared)"]
     end
 
-    MAIN --> CONFIG
-    MAIN --> CLIENT
-    MAIN --> STORE
+    %% Proactive path
     MAIN --> POLLER
     POLLER -- "polls" --> CLIENT
     CLIENT -- "HTTP" --> FPL
     POLLER -- "snapshots" --> STORE
     STORE -- "pgx" --> PG
     POLLER -- "on finalize" --> STATS
-    STATS -- "reads prev GW" --> STORE
+    STATS -- "reads" --> STORE
     STATS -- "alerts" --> NOTIFY
     NOTIFY -- "HTTP" --> TG
+
+    %% Reactive path
+    USER -- "/command" --> TUNNEL
+    TUNNEL -- "POST /webhook/secret" --> BOT
+    BOT -- "queries" --> STATS
+    BOT -- "queries" --> STORE
+    BOT -- "queries" --> CLIENT
+    BOT -- "reply" --> NOTIFY
 
     style CONFIG fill:#2d6a2d,stroke:#4a4,color:#fff
     style CLIENT fill:#2d6a2d,stroke:#4a4,color:#fff
@@ -60,9 +76,13 @@ flowchart LR
     style POLLER fill:#2d6a2d,stroke:#4a4,color:#fff
     style STATS fill:#2d6a2d,stroke:#4a4,color:#fff
     style NOTIFY fill:#2d6a2d,stroke:#4a4,color:#fff
+    style BOT fill:#2d6a2d,stroke:#4a4,color:#fff
+    style TUNNEL fill:#2d6a2d,stroke:#4a4,color:#fff
 ```
 
-> **Legend:** Green = completed, Amber = planned
+**Two data paths:**
+- **Proactive** — poller detects gameweek finalization → stats computes alerts → Telegram delivery (automatic)
+- **Reactive** — user sends a command in Telegram → webhook → bot routes to handler → reply sent
 
 ## Tech stack
 
@@ -127,10 +147,24 @@ The bot supports two operating modes, controlled by whether Telegram credentials
 
 | Mode | Telegram vars | Behavior |
 |------|---------------|----------|
-| **Data collection only** | Omitted | Polls the FPL API, persists standings and chip data to Postgres. No notifications sent. |
-| **Full** | Both set | Polls and persists data, computes stats diffs, and sends banter-worthy alerts to the configured Telegram chat when a gameweek finalizes. |
+| **Data collection only** | Omitted | Polls the FPL API, persists standings and chip data to Postgres. No notifications sent, no webhook server started. |
+| **Full** | Both set | Polls and persists data, computes stats diffs, sends gameweek alerts automatically, and serves the webhook endpoint for Telegram commands. Requires `WEBHOOK_BASE_URL`. |
 
 Data-collection-only mode is useful for building up historical data before enabling notifications, or for running the bot purely as a data pipeline. Setting only one of `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` is treated as a misconfiguration and the bot will refuse to start.
+
+**Full mode requires a publicly reachable HTTPS URL** so Telegram can deliver webhook updates. Use [ngrok](https://ngrok.com/) or [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) to expose port 8080:
+
+```bash
+# ngrok
+ngrok http 8080
+# → set WEBHOOK_BASE_URL=https://xxxxx.ngrok.io in .env
+
+# cloudflared (free, no account needed for a temporary tunnel)
+cloudflared tunnel --url http://localhost:8080
+# → set WEBHOOK_BASE_URL=https://xxxxx.trycloudflare.com in .env
+```
+
+On startup the bot registers its webhook URL with Telegram and deregisters it on clean shutdown.
 
 ### 4. Backfill historical gameweeks (optional)
 
@@ -157,6 +191,9 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 | `FPL_LEAGUE_TYPE` | No | `h2h` or `classic` (default: `h2h`) |
 | `TELEGRAM_BOT_TOKEN` | No | Token from @BotFather (omit for data-collection-only mode) |
 | `TELEGRAM_CHAT_ID` | No | Target group chat ID (omit for data-collection-only mode) |
+| `WEBHOOK_BASE_URL` | When Telegram is set | Public HTTPS URL for Telegram to deliver updates (e.g. your ngrok URL, no trailing slash) |
+| `WEBHOOK_PORT` | No | Local port for the HTTP server (default: `8080`) |
+| `WEBHOOK_SECRET` | No | Secret path component for webhook URL security (auto-generated if omitted) |
 | `DATABASE_URL` | Yes | Postgres connection string |
 | `STORE_TEST_DATABASE_URL` | No | Test database connection string (for integration tests) |
 | `POLL_IDLE_INTERVAL` | No | Seconds between polls when idle (default: `21600` — 6 hours) |
@@ -173,6 +210,7 @@ cmd/notify-test/     Pipeline diagnostic — test stats → Telegram with real d
 internal/config/     Environment variable loading + validation
 internal/fpl/        FPL HTTP client + API response types
 internal/poller/     Gameweek lifecycle state machine (Idle → Live → Processing)
+internal/bot/        Webhook server + Telegram command router (/standings, /streak, /history, /deadline)
 internal/stats/      Diff engine + alert detection
 internal/store/      Database interface + Postgres implementation + embedded migrations
 pkg/notify/          Notifier interface (public API for chat platforms)
@@ -306,7 +344,7 @@ migrate -path internal/store/migrations -database "$DATABASE_URL" down 1
 
 - **H2H leagues only** — classic league support is planned but not yet implemented. The bot fails fast on startup if `FPL_LEAGUE_TYPE` is not `h2h`.
 - **Backfill standings are synthetic** — see the [backfill section](#4-backfill-historical-gameweeks-optional) for details on this FPL API limitation.
-- **Proactive alerts only** — the bot posts automatically when a gameweek finalizes, but does not yet respond to user commands (`/standings`, `/streak`, etc.). Reactive commands are planned for Phase 1.7.
+- **Webhook requires a public URL** — in full mode, a tunnel (ngrok, Cloudflare) is needed for local development. In production, the bot's host must be publicly reachable over HTTPS.
 
 ## License
 

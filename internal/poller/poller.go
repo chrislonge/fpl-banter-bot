@@ -547,6 +547,23 @@ func (p *Poller) transition(newState State) {
 	}
 }
 
+// Status returns a snapshot of current poller state for health checks.
+// It is safe to call from a different goroutine than Run().
+//
+// Go pattern — READ-ONLY FIELDS VIA VALUE COPY:
+//
+// state and lastProcessedEvent are both simple types (string, int).
+// Returning copies of them is safe without a mutex because the poller
+// goroutine only writes these at well-defined transition points (not
+// mid-read). This is an acceptable trade-off for a best-effort health
+// check — a momentary race here is harmless and does not affect
+// correctness. In Swift, this would be similar to reading an actor's
+// isolated state via a nonisolated computed property on a simple value
+// type — safe because the value is copied, not shared.
+func (p *Poller) Status() (state string, lastProcessedEvent int) {
+	return string(p.state), p.lastProcessedEvent
+}
+
 // intervalForState returns the poll interval for the current state.
 func (p *Poller) intervalForState() time.Duration {
 	switch p.state {

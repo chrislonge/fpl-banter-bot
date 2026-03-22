@@ -14,6 +14,9 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
+	"github.com/chrislonge/fpl-banter-bot/internal/bot"
 	"github.com/chrislonge/fpl-banter-bot/internal/config"
 	"github.com/chrislonge/fpl-banter-bot/internal/fpl"
 	"github.com/chrislonge/fpl-banter-bot/internal/poller"
@@ -152,9 +155,16 @@ func main() {
 	// "implements" keyword needed. This is Go's structural typing.
 	var onFinalized poller.OnGameweekFinalized
 
+	// Hoist statsEngine and tgNotifier to outer scope so they're available
+	// for both the proactive pipeline (onFinalized) and the reactive bot
+	// server (bot.New). In the previous phase, these were scoped inside the
+	// if-block; now the bot server needs them too.
+	var statsEngine *stats.Engine
+	var tgNotifier *telegram.Client
+
 	if cfg.TelegramConfigured {
-		statsEngine := stats.New(appStore, int64(cfg.FPLLeagueID))
-		tgNotifier := telegram.New(
+		statsEngine = stats.New(appStore, int64(cfg.FPLLeagueID))
+		tgNotifier = telegram.New(
 			&http.Client{Timeout: 10 * time.Second},
 			cfg.TelegramBotToken,
 			cfg.TelegramChatID,
@@ -182,12 +192,62 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Run the poller. This blocks until the context is cancelled (SIGINT
-	// or SIGTERM). The poller follows the http.ListenAndServe convention:
-	// Run() blocks, and the caller (us) controls lifecycle.
+	// Go pattern — errgroup STRUCTURED CONCURRENCY:
+	//
+	// errgroup.WithContext creates a group of goroutines that share a derived
+	// context (gctx). Key properties:
+	//
+	//   1. First error cancels gctx — if the webhook server crashes, the
+	//      poller's ctx.Done() fires and it shuts down (and vice versa).
+	//   2. g.Wait() blocks until ALL goroutines return, collecting the
+	//      first non-nil error.
+	//   3. No goroutine outlives its spawner — structured concurrency
+	//      guarantees cleanup.
+	//
+	// This is the Go equivalent of Swift's TaskGroup or Kotlin's
+	// coroutineScope { launch { ... }; launch { ... } }. The semantics
+	// are identical: first failure cancels the group, Wait/awaitAll
+	// collects the result.
+	//
+	// Compare to the previous pattern (p.Run(ctx) blocking main):
+	// that worked for one goroutine, but with two (poller + webhook server),
+	// we need structured concurrency to ensure clean shutdown of both.
+	g, gctx := errgroup.WithContext(ctx)
+
 	slog.Info("starting poller")
-	if err := p.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		slog.Error("poller exited with error", "error", err)
+	g.Go(func() error { return p.Run(gctx) })
+
+	if cfg.TelegramConfigured {
+		webhookURL := cfg.WebhookBaseURL + "/webhook/" + cfg.WebhookSecret
+		slog.Info("webhook URL", "url", webhookURL)
+
+		// Wire the bot server with all its dependencies.
+		//
+		// *telegram.Client satisfies bot.TelegramBot (SendRaw, SetWebhook,
+		// DeleteWebhook). *stats.Engine satisfies bot.StatsQuerier.
+		// *store.PostgresStore satisfies bot.LeagueStore. *fpl.Client
+		// satisfies bot.FPLQuerier. *poller.Poller satisfies
+		// bot.PollerStatusProvider. All via implicit structural typing.
+		botServer := bot.New(
+			tgNotifier,  // satisfies bot.TelegramBot
+			statsEngine, // satisfies bot.StatsQuerier
+			appStore,    // satisfies bot.LeagueStore
+			fplClient,   // satisfies bot.FPLQuerier
+			p,           // satisfies bot.PollerStatusProvider
+			bot.Config{
+				LeagueID:       int64(cfg.FPLLeagueID),
+				ChatID:         cfg.TelegramChatID,
+				Port:           cfg.WebhookPort,
+				WebhookBaseURL: cfg.WebhookBaseURL,
+				WebhookSecret:  cfg.WebhookSecret,
+			},
+		)
+
+		g.Go(func() error { return botServer.RunServer(gctx) })
+	}
+
+	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
+		slog.Error("bot exited with error", "error", err)
 		os.Exit(1)
 	}
 	slog.Info("shutdown complete")
