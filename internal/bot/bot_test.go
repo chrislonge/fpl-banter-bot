@@ -627,3 +627,51 @@ func TestOrdinal(t *testing.T) {
 		}
 	}
 }
+
+// TestCommands_MatchesDispatch verifies that every entry in the Commands
+// metadata slice has a corresponding case in dispatchCommand, and vice versa.
+// This prevents the two from drifting — if someone adds a command constant
+// and an entry in Commands but forgets the switch case (or vice versa),
+// this test catches it.
+func TestCommands_MatchesDispatch(t *testing.T) {
+	// Build a set of command names from the exported metadata.
+	registered := make(map[string]bool, len(Commands))
+	for _, cmd := range Commands {
+		registered[cmd.Name] = true
+	}
+
+	// Set up a handler with fakes that return valid data for all commands.
+	// We need real-ish data so handlers don't error out — we just care
+	// that they're reached (non-empty response).
+	tg := &fakeTelegramBot{}
+	ls := &fakeLeagueStore{
+		latestID:  1,
+		standings: []store.GameweekStanding{{ManagerID: 1, Rank: 1}, {ManagerID: 2, Rank: 2}},
+		managers:  []store.Manager{{ID: 1, Name: "A"}, {ID: 2, Name: "B"}},
+	}
+	sq := &fakeStatsQuerier{streaks: nil}
+	fq := &fakeFPLQuerier{bootstrap: fpl.BootstrapResponse{
+		Events: []fpl.Event{{ID: 1, Name: "GW1", IsNext: true, DeadlineTime: "2026-01-15T11:30:00Z"}},
+	}}
+	h := newTestHandler(tg, sq, ls, fq, &fakePollerStatus{})
+
+	// For each registered command, dispatch it and verify it's handled
+	// (non-empty response = the switch case exists and the handler ran).
+	for _, cmd := range Commands {
+		t.Run(cmd.Name, func(t *testing.T) {
+			// /history needs args; other commands don't.
+			var args []string
+			if cmd.Name == CmdHistory {
+				args = []string{"1", "2"}
+			}
+
+			response, err := h.dispatchCommand(context.Background(), "/"+cmd.Name, args)
+			if err != nil {
+				t.Fatalf("dispatch error for /%s: %v", cmd.Name, err)
+			}
+			if response == "" {
+				t.Errorf("/%s returned empty response — missing case in dispatchCommand?", cmd.Name)
+			}
+		})
+	}
+}

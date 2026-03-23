@@ -84,6 +84,81 @@ func newWithURL(httpClient *http.Client, apiURL string, chatID string) *Client {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Private JSON-over-HTTP helper
+// ---------------------------------------------------------------------------
+//
+// Go pattern — EXTRACT WHEN DUPLICATION CROSSES THE THRESHOLD:
+//
+// sendMessageTo, SetWebhook, and DeleteWebhook all repeated the same
+// pattern: marshal JSON → POST → read response (capped at 64KB) → check
+// HTTP status → parse Telegram envelope → check ok. Adding SetMyCommands
+// as a fourth copy was the tipping point for extraction. The helper is
+// private because it encodes Telegram-specific response semantics — it's
+// not a general-purpose HTTP helper.
+
+// postJSON POSTs a JSON body to a Telegram Bot API method and checks
+// the standard response envelope. method is the API method name
+// (e.g. "sendMessage", "setWebhook"). payload is marshalled to JSON;
+// pass nil for methods with no body (e.g. deleteWebhook).
+func (c *Client) postJSON(ctx context.Context, method string, payload any) error {
+	var bodyReader io.Reader
+	if payload != nil {
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("marshalling %s request: %w", method, err)
+		}
+		bodyReader = bytes.NewReader(body)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL+"/"+method, bodyReader)
+	if err != nil {
+		return fmt.Errorf("creating %s request: %w", method, err)
+	}
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("calling %s: %w", method, err)
+	}
+	defer resp.Body.Close()
+
+	// Cap response reads to prevent unbounded memory allocation from a
+	// misbehaving upstream proxy. Telegram responses are typically < 1KB.
+	const maxResponseBytes = 1 << 16 // 64KB
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return fmt.Errorf("reading %s response: %w", method, err)
+	}
+
+	// Check HTTP status first — a non-200 is always an error, regardless
+	// of what the JSON body says. This prevents a pathological case where
+	// a non-200 response contains parseable JSON with ok: true.
+	if resp.StatusCode != http.StatusOK {
+		var tgResp telegramResponse
+		if err := json.Unmarshal(respBody, &tgResp); err == nil && tgResp.Description != "" {
+			return &APIError{StatusCode: resp.StatusCode, Description: tgResp.Description}
+		}
+		return &APIError{StatusCode: resp.StatusCode, Description: string(respBody)}
+	}
+
+	var tgResp telegramResponse
+	if err := json.Unmarshal(respBody, &tgResp); err != nil {
+		return fmt.Errorf("parsing %s response: %w", method, err)
+	}
+	if !tgResp.OK {
+		return &APIError{StatusCode: resp.StatusCode, Description: tgResp.Description}
+	}
+
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Message sending
+// ---------------------------------------------------------------------------
+
 // SendAlerts formats the alerts and sends each resulting message chunk
 // to the configured Telegram chat.
 //
@@ -123,66 +198,11 @@ func (c *Client) sendMessage(ctx context.Context, text string) error {
 
 // sendMessageTo POSTs a single HTML-formatted message to an arbitrary chat.
 func (c *Client) sendMessageTo(ctx context.Context, chatID, text string) error {
-	body, err := json.Marshal(sendMessageRequest{
+	return c.postJSON(ctx, "sendMessage", sendMessageRequest{
 		ChatID:    chatID,
 		Text:      text,
 		ParseMode: "HTML",
 	})
-	if err != nil {
-		return fmt.Errorf("marshalling request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL+"/sendMessage", bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("sending message: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Cap response reads to prevent unbounded memory allocation from a
-	// misbehaving upstream proxy. Telegram responses are typically < 1KB.
-	const maxResponseBytes = 1 << 16 // 64KB
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return fmt.Errorf("reading response: %w", err)
-	}
-
-	// Check HTTP status first — a non-200 is always an error, regardless
-	// of what the JSON body says. This prevents a pathological case where
-	// a non-200 response contains parseable JSON with ok: true.
-	if resp.StatusCode != http.StatusOK {
-		var tgResp telegramResponse
-		if err := json.Unmarshal(respBody, &tgResp); err == nil && tgResp.Description != "" {
-			return &APIError{
-				StatusCode:  resp.StatusCode,
-				Description: tgResp.Description,
-			}
-		}
-		return &APIError{
-			StatusCode:  resp.StatusCode,
-			Description: string(respBody),
-		}
-	}
-
-	// Parse the Telegram response envelope for 200 responses.
-	var tgResp telegramResponse
-	if err := json.Unmarshal(respBody, &tgResp); err != nil {
-		return fmt.Errorf("parsing response: %w", err)
-	}
-
-	if !tgResp.OK {
-		return &APIError{
-			StatusCode:  resp.StatusCode,
-			Description: tgResp.Description,
-		}
-	}
-
-	return nil
 }
 
 // SendRaw sends an HTML-formatted message to an arbitrary chat. This is the
@@ -194,6 +214,10 @@ func (c *Client) sendMessageTo(ctx context.Context, chatID, text string) error {
 func (c *Client) SendRaw(ctx context.Context, chatID, text string) error {
 	return c.sendMessageTo(ctx, chatID, text)
 }
+
+// ---------------------------------------------------------------------------
+// Webhook management
+// ---------------------------------------------------------------------------
 
 // setWebhookRequest is the JSON body for the Telegram setWebhook API.
 type setWebhookRequest struct {
@@ -208,87 +232,69 @@ type setWebhookRequest struct {
 // without it, restarting the bot after a long outage floods the group chat
 // with stale command replies. This is called once on startup from RunServer.
 func (c *Client) SetWebhook(ctx context.Context, url string) error {
-	body, err := json.Marshal(setWebhookRequest{
+	return c.postJSON(ctx, "setWebhook", setWebhookRequest{
 		URL:                url,
 		DropPendingUpdates: true,
 	})
-	if err != nil {
-		return fmt.Errorf("marshalling setWebhook request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL+"/setWebhook", bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("creating setWebhook request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("calling setWebhook: %w", err)
-	}
-	defer resp.Body.Close()
-
-	const maxResponseBytes = 1 << 16
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return fmt.Errorf("reading setWebhook response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		var tgResp telegramResponse
-		if err := json.Unmarshal(respBody, &tgResp); err == nil && tgResp.Description != "" {
-			return &APIError{StatusCode: resp.StatusCode, Description: tgResp.Description}
-		}
-		return &APIError{StatusCode: resp.StatusCode, Description: string(respBody)}
-	}
-
-	var tgResp telegramResponse
-	if err := json.Unmarshal(respBody, &tgResp); err != nil {
-		return fmt.Errorf("parsing setWebhook response: %w", err)
-	}
-	if !tgResp.OK {
-		return &APIError{StatusCode: resp.StatusCode, Description: tgResp.Description}
-	}
-
-	return nil
 }
 
 // DeleteWebhook deregisters the webhook on graceful shutdown so Telegram
 // stops sending updates to the now-unreachable URL. This is best-effort —
 // if it fails, Telegram will eventually time out and stop retrying.
 func (c *Client) DeleteWebhook(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL+"/deleteWebhook", nil)
-	if err != nil {
-		return fmt.Errorf("creating deleteWebhook request: %w", err)
-	}
+	return c.postJSON(ctx, "deleteWebhook", nil)
+}
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("calling deleteWebhook: %w", err)
-	}
-	defer resp.Body.Close()
+// ---------------------------------------------------------------------------
+// Bot command registration
+// ---------------------------------------------------------------------------
 
-	const maxResponseBytes = 1 << 16
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return fmt.Errorf("reading deleteWebhook response: %w", err)
-	}
+// BotCommand represents a Telegram bot command for the setMyCommands API.
+type BotCommand struct {
+	Command     string `json:"command"`
+	Description string `json:"description"`
+}
 
-	if resp.StatusCode != http.StatusOK {
-		var tgResp telegramResponse
-		if err := json.Unmarshal(respBody, &tgResp); err == nil && tgResp.Description != "" {
-			return &APIError{StatusCode: resp.StatusCode, Description: tgResp.Description}
-		}
-		return &APIError{StatusCode: resp.StatusCode, Description: string(respBody)}
-	}
+// BotCommandScope targets command registration to a specific scope.
+// Telegram supports several scope types; this bot uses "chat" to register
+// commands only in the configured group, preventing them from appearing
+// in chats where the bot would silently ignore updates.
+//
+// Pass nil for the default scope (all private chats).
+type BotCommandScope struct {
+	Type   string `json:"type"`
+	ChatID string `json:"chat_id,omitempty"`
+}
 
-	var tgResp telegramResponse
-	if err := json.Unmarshal(respBody, &tgResp); err != nil {
-		return fmt.Errorf("parsing deleteWebhook response: %w", err)
-	}
-	if !tgResp.OK {
-		return &APIError{StatusCode: resp.StatusCode, Description: tgResp.Description}
-	}
+type setMyCommandsRequest struct {
+	Commands []BotCommand     `json:"commands"`
+	Scope    *BotCommandScope `json:"scope,omitempty"`
+}
 
-	return nil
+type deleteMyCommandsRequest struct {
+	Scope *BotCommandScope `json:"scope,omitempty"`
+}
+
+// SetMyCommands registers the bot's command list with Telegram so users
+// see autocomplete suggestions when typing "/". Commands are registered
+// for the given scope — use BotCommandScope{Type: "chat", ChatID: id}
+// to target a specific chat.
+//
+// This is idempotent: calling it on every startup replaces the previous
+// list, ensuring the menu always matches the running code.
+func (c *Client) SetMyCommands(ctx context.Context, commands []BotCommand, scope *BotCommandScope) error {
+	return c.postJSON(ctx, "setMyCommands", setMyCommandsRequest{
+		Commands: commands,
+		Scope:    scope,
+	})
+}
+
+// DeleteMyCommands removes the bot's command list for the given scope.
+// Pass nil for the default scope. This is used on startup to clear any
+// previously-set global commands that might leak into chats where the
+// bot doesn't respond.
+func (c *Client) DeleteMyCommands(ctx context.Context, scope *BotCommandScope) error {
+	return c.postJSON(ctx, "deleteMyCommands", deleteMyCommandsRequest{
+		Scope: scope,
+	})
 }

@@ -53,6 +53,47 @@ func testServer(t *testing.T, statusCode int, body string) (*httptest.Server, *[
 	return server, &received
 }
 
+// rawRequest records the HTTP method, URL path, and raw JSON body.
+type rawRequest struct {
+	Method string
+	Path   string
+	Body   json.RawMessage
+}
+
+// rawTestServer creates an httptest server that captures raw request bodies
+// (not tied to a specific request type). Used for testing SetMyCommands,
+// DeleteMyCommands, and other non-sendMessage API calls.
+func rawTestServer(t *testing.T, statusCode int, body string) (*httptest.Server, *[]rawRequest) {
+	t.Helper()
+
+	var mu sync.Mutex
+	var received []rawRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("reading request body: %v", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+		mu.Lock()
+		received = append(received, rawRequest{
+			Method: r.Method,
+			Path:   r.URL.Path,
+			Body:   json.RawMessage(bodyBytes),
+		})
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(statusCode)
+		w.Write([]byte(body))
+	}))
+
+	t.Cleanup(server.Close)
+	return server, &received
+}
+
 // singleAlert returns a minimal alert slice for testing the HTTP layer.
 func singleAlert() []notify.Alert {
 	return []notify.Alert{
@@ -248,5 +289,136 @@ func TestSendAlerts_ContextCancellation(t *testing.T) {
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled, got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SetMyCommands / DeleteMyCommands tests
+// ---------------------------------------------------------------------------
+
+func TestSetMyCommands_Success(t *testing.T) {
+	server, received := rawTestServer(t, http.StatusOK, `{"ok": true}`)
+	client := newWithURL(server.Client(), server.URL, "-12345")
+
+	commands := []BotCommand{
+		{Command: "standings", Description: "Current league standings"},
+		{Command: "streak", Description: "Active streaks"},
+	}
+	scope := &BotCommandScope{Type: "chat", ChatID: "-12345"}
+
+	err := client.SetMyCommands(context.Background(), commands, scope)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(*received) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(*received))
+	}
+
+	req := (*received)[0]
+	if req.Path != "/setMyCommands" {
+		t.Errorf("path = %q, want /setMyCommands", req.Path)
+	}
+
+	// Verify the request body contains commands and scope.
+	var body setMyCommandsRequest
+	if err := json.Unmarshal(req.Body, &body); err != nil {
+		t.Fatalf("unmarshalling request body: %v", err)
+	}
+	if len(body.Commands) != 2 {
+		t.Errorf("commands count = %d, want 2", len(body.Commands))
+	}
+	if body.Commands[0].Command != "standings" {
+		t.Errorf("first command = %q, want %q", body.Commands[0].Command, "standings")
+	}
+	if body.Scope == nil {
+		t.Fatal("scope is nil, want chat scope")
+	}
+	if body.Scope.Type != "chat" {
+		t.Errorf("scope type = %q, want %q", body.Scope.Type, "chat")
+	}
+	if body.Scope.ChatID != "-12345" {
+		t.Errorf("scope chat_id = %q, want %q", body.Scope.ChatID, "-12345")
+	}
+}
+
+func TestSetMyCommands_NilScope(t *testing.T) {
+	server, received := rawTestServer(t, http.StatusOK, `{"ok": true}`)
+	client := newWithURL(server.Client(), server.URL, "-12345")
+
+	commands := []BotCommand{
+		{Command: "standings", Description: "Current league standings"},
+	}
+
+	err := client.SetMyCommands(context.Background(), commands, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify scope is omitted from JSON when nil.
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal((*received)[0].Body, &body); err != nil {
+		t.Fatalf("unmarshalling: %v", err)
+	}
+	if _, ok := body["scope"]; ok {
+		t.Error("scope should be omitted when nil")
+	}
+}
+
+func TestSetMyCommands_APIError(t *testing.T) {
+	server, _ := rawTestServer(t, http.StatusBadRequest,
+		`{"ok": false, "description": "Bad Request: invalid command"}`)
+	client := newWithURL(server.Client(), server.URL, "-12345")
+
+	err := client.SetMyCommands(context.Background(), []BotCommand{
+		{Command: "standings", Description: "test"},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected error for non-200 status")
+	}
+
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *APIError, got %T: %v", err, err)
+	}
+	if apiErr.StatusCode != http.StatusBadRequest {
+		t.Errorf("status code = %d, want %d", apiErr.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestDeleteMyCommands_Success(t *testing.T) {
+	server, received := rawTestServer(t, http.StatusOK, `{"ok": true}`)
+	client := newWithURL(server.Client(), server.URL, "-12345")
+
+	// nil scope targets the default scope.
+	err := client.DeleteMyCommands(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(*received) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(*received))
+	}
+	if (*received)[0].Path != "/deleteMyCommands" {
+		t.Errorf("path = %q, want /deleteMyCommands", (*received)[0].Path)
+	}
+}
+
+func TestDeleteMyCommands_WithChatScope(t *testing.T) {
+	server, received := rawTestServer(t, http.StatusOK, `{"ok": true}`)
+	client := newWithURL(server.Client(), server.URL, "-12345")
+
+	scope := &BotCommandScope{Type: "chat", ChatID: "-12345"}
+	err := client.DeleteMyCommands(context.Background(), scope)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var body deleteMyCommandsRequest
+	if err := json.Unmarshal((*received)[0].Body, &body); err != nil {
+		t.Fatalf("unmarshalling: %v", err)
+	}
+	if body.Scope == nil || body.Scope.Type != "chat" {
+		t.Errorf("scope = %+v, want chat scope", body.Scope)
 	}
 }

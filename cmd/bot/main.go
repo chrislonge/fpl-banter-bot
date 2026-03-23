@@ -183,6 +183,27 @@ func main() {
 			return tgNotifier.SendAlerts(ctx, alerts)
 		}
 
+		// Register bot commands scoped to the configured chat.
+		// Using chat scope prevents commands from appearing in other chats
+		// where the bot would silently ignore them (see handleUpdate chat ID filter).
+		tgCmds := make([]telegram.BotCommand, len(bot.Commands))
+		for i, cmd := range bot.Commands {
+			tgCmds[i] = telegram.BotCommand{
+				Command:     cmd.Name,
+				Description: cmd.Description,
+			}
+		}
+		chatScope := &telegram.BotCommandScope{Type: "chat", ChatID: cfg.TelegramChatID}
+
+		// Clear any previously-set default-scope commands so they don't
+		// leak into other chats.
+		if err := tgNotifier.DeleteMyCommands(ctx, nil); err != nil {
+			slog.Warn("failed to clear default-scope commands", "error", err)
+		}
+		if err := tgNotifier.SetMyCommands(ctx, tgCmds, chatScope); err != nil {
+			slog.Warn("failed to register bot commands", "error", err)
+		}
+
 		slog.Info("notification pipeline wired", "platform", "telegram")
 	}
 
