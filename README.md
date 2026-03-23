@@ -156,7 +156,8 @@ Data-collection-only mode is useful for building up historical data before enabl
 
 ```bash
 # Tailscale Funnel (recommended)
-tailscale funnel 8080
+# --bg persists across reboots via the Tailscale daemon
+sudo tailscale funnel --bg 8080
 # → set WEBHOOK_BASE_URL=https://your-machine.tail<id>.ts.net in .env
 ```
 
@@ -174,8 +175,13 @@ On startup the bot registers its webhook URL with Telegram and deregisters it on
 If the bot was deployed mid-season, it only has data from the gameweek it first ran. The backfill command populates all previous finished gameweeks:
 
 ```bash
+# Local development (Go required)
 make backfill
 # or: go run cmd/backfill/main.go
+
+# Docker deployment (Pi or any server)
+make docker-backfill
+# or: docker compose run --rm backfill
 ```
 
 This is a one-time operation. It detects which gameweeks are missing from the database and fills the gaps. Running it again is safe (idempotent) — it skips gameweeks that already exist. Press `Ctrl+C` to cancel mid-backfill; progress is saved per-gameweek.
@@ -246,11 +252,13 @@ make test-telegram # Telegram integration test (sends a real message to your cha
 make test-all     # all tests including store integration
 make lint         # golangci-lint run
 make run          # go run cmd/bot/main.go
-make backfill     # go run cmd/backfill/main.go (one-time historical data)
-make notify-test  # test full stats → Telegram pipeline with real DB data
-make db-up        # docker compose up -d db
-make db-down      # docker compose down
-make db-reset     # destroy + recreate DB (needed after schema changes)
+make backfill        # go run cmd/backfill/main.go (one-time historical data)
+make docker-backfill # docker compose run --rm backfill (Docker deployment)
+make deploy          # docker compose up -d --build (build + start full stack)
+make notify-test     # test full stats → Telegram pipeline with real DB data
+make db-up           # docker compose up -d db
+make db-down         # docker compose down
+make db-reset        # destroy + recreate DB (needed after schema changes)
 ```
 
 The Makefile automatically loads your `.env` file, so variables like `STORE_TEST_DATABASE_URL` are available without typing them. That means `make test` will include store integration tests whenever your `.env` sets a test database URL.
@@ -342,6 +350,43 @@ make db-reset
 migrate -path internal/store/migrations -database "$DATABASE_URL" up
 migrate -path internal/store/migrations -database "$DATABASE_URL" down 1
 ```
+
+## Deploying to a Raspberry Pi
+
+The bot is designed to run on a Raspberry Pi (ARM64). Docker builds the image natively — no cross-compilation needed.
+
+```bash
+# 1. Install Tailscale
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+
+# 2. Clone and configure
+git clone https://github.com/chrislonge/fpl-banter-bot.git
+cd fpl-banter-bot
+cp .env.example .env
+nano .env
+# IMPORTANT: set DATABASE_URL=postgres://fplbot:password@db:5432/fplbanterbot?sslmode=disable
+#            (use @db:5432, not @localhost:5432 — containers reference each other by service name)
+
+# 3. Start the stack
+make deploy
+# or: docker compose up -d --build
+
+# 4. Backfill historical gameweeks
+make docker-backfill
+
+# 5. Expose webhook to Telegram
+sudo tailscale funnel --bg 8080
+```
+
+**Updating after code changes:**
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+Docker's layer cache makes rebuilds fast when only Go source changed.
 
 ## Known limitations
 
