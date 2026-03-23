@@ -304,7 +304,7 @@ func TestSetMyCommands_Success(t *testing.T) {
 		{Command: "standings", Description: "Current league standings"},
 		{Command: "streak", Description: "Active streaks"},
 	}
-	scope := &BotCommandScope{Type: "chat", ChatID: "-12345"}
+	scope := &BotCommandScope{Type: "chat", ChatID: -12345}
 
 	err := client.SetMyCommands(context.Background(), commands, scope)
 	if err != nil {
@@ -337,8 +337,8 @@ func TestSetMyCommands_Success(t *testing.T) {
 	if body.Scope.Type != "chat" {
 		t.Errorf("scope type = %q, want %q", body.Scope.Type, "chat")
 	}
-	if body.Scope.ChatID != "-12345" {
-		t.Errorf("scope chat_id = %q, want %q", body.Scope.ChatID, "-12345")
+	if body.Scope.ChatID != -12345 {
+		t.Errorf("scope chat_id = %d, want %d", body.Scope.ChatID, -12345)
 	}
 }
 
@@ -353,6 +353,10 @@ func TestSetMyCommands_NilScope(t *testing.T) {
 	err := client.SetMyCommands(context.Background(), commands, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(*received) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(*received))
 	}
 
 	// Verify scope is omitted from JSON when nil.
@@ -408,10 +412,14 @@ func TestDeleteMyCommands_WithChatScope(t *testing.T) {
 	server, received := rawTestServer(t, http.StatusOK, `{"ok": true}`)
 	client := newWithURL(server.Client(), server.URL, "-12345")
 
-	scope := &BotCommandScope{Type: "chat", ChatID: "-12345"}
+	scope := &BotCommandScope{Type: "chat", ChatID: -12345}
 	err := client.DeleteMyCommands(context.Background(), scope)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(*received) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(*received))
 	}
 
 	var body deleteMyCommandsRequest

@@ -260,10 +260,10 @@ type BotCommand struct {
 // commands only in the configured group, preventing them from appearing
 // in chats where the bot would silently ignore updates.
 //
-// Pass nil for the default scope (all private chats).
+// Pass nil for the default scope (global, all users/chats; distinct from "all_private_chats").
 type BotCommandScope struct {
 	Type   string `json:"type"`
-	ChatID string `json:"chat_id,omitempty"`
+	ChatID int64  `json:"chat_id,omitempty"`
 }
 
 type setMyCommandsRequest struct {

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -193,7 +194,12 @@ func main() {
 				Description: cmd.Description,
 			}
 		}
-		chatScope := &telegram.BotCommandScope{Type: "chat", ChatID: cfg.TelegramChatID}
+		chatID, err := strconv.ParseInt(cfg.TelegramChatID, 10, 64)
+		if err != nil {
+			slog.Error("invalid TELEGRAM_CHAT_ID for command registration", "error", err)
+			os.Exit(1)
+		}
+		chatScope := &telegram.BotCommandScope{Type: "chat", ChatID: chatID}
 
 		// Clear any previously-set default-scope commands so they don't
 		// leak into other chats.

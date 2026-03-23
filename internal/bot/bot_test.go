@@ -629,10 +629,9 @@ func TestOrdinal(t *testing.T) {
 }
 
 // TestCommands_MatchesDispatch verifies that every entry in the Commands
-// metadata slice has a corresponding case in dispatchCommand, and vice versa.
-// This prevents the two from drifting — if someone adds a command constant
-// and an entry in Commands but forgets the switch case (or vice versa),
-// this test catches it.
+// metadata slice has a corresponding case in dispatchCommand. This helps
+// prevent the two from drifting — if someone adds a command constant and
+// an entry in Commands but forgets the switch case, this test catches it.
 func TestCommands_MatchesDispatch(t *testing.T) {
 	// Build a set of command names from the exported metadata.
 	registered := make(map[string]bool, len(Commands))
