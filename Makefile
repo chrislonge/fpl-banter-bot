@@ -3,7 +3,7 @@
 -include .env
 export
 
-.PHONY: build test test-store test-telegram test-all lint run backfill notify-test db-up db-down db-reset
+.PHONY: build test test-store test-telegram test-all lint run backfill docker-backfill notify-test db-up db-down db-reset deploy
 
 ## Build the bot binary
 build:
@@ -33,9 +33,17 @@ lint:
 run:
 	go run cmd/bot/main.go
 
-## Backfill historical gameweeks (one-time operation)
+## Backfill historical gameweeks (local, requires Postgres running)
 backfill:
 	go run cmd/backfill/main.go
+
+## Backfill via Docker Compose (used on Pi or any Docker deployment)
+docker-backfill:
+	docker compose run --rm backfill
+
+## Build and start the full stack (db + bot) in detached mode
+deploy:
+	docker compose up -d --build
 
 ## Test the full stats → notify pipeline with real DB data (requires Postgres + Telegram)
 ## Usage: make notify-test              (latest gameweek)
