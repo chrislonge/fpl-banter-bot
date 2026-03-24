@@ -141,6 +141,10 @@ func handleHistory(ctx context.Context, sq StatsQuerier, s LeagueStore, leagueID
 // handleDeadline fetches the bootstrap data and finds the next gameweek
 // deadline to display.
 func handleDeadline(ctx context.Context, fq FPLQuerier, loc *time.Location) (string, error) {
+	if loc == nil {
+		loc = time.UTC
+	}
+
 	bootstrap, err := fq.GetBootstrap(ctx)
 	if err != nil {
 		return "", fmt.Errorf("get bootstrap: %w", err)

@@ -143,6 +143,14 @@ func New(
 	poller PollerStatusProvider,
 	cfg Config,
 ) *Handler {
+	// Default to UTC if no timezone was provided. This guards against callers
+	// constructing a zero-value Config (e.g., in tests or alternative mains)
+	// without setting DeadlineTimezone.
+	tz := cfg.DeadlineTimezone
+	if tz == nil {
+		tz = time.UTC
+	}
+
 	webhookURL := strings.TrimRight(cfg.WebhookBaseURL, "/") + "/webhook/" + cfg.WebhookSecret
 	return &Handler{
 		tg:            tg,
@@ -155,7 +163,7 @@ func New(
 		port:          cfg.Port,
 		webhookSecret:    cfg.WebhookSecret,
 		webhookURL:       webhookURL,
-		deadlineTimezone: cfg.DeadlineTimezone,
+		deadlineTimezone: tz,
 	}
 }
 
