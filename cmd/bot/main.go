@@ -264,8 +264,9 @@ func main() {
 				LeagueID:       int64(cfg.FPLLeagueID),
 				ChatID:         cfg.TelegramChatID,
 				Port:           cfg.WebhookPort,
-				WebhookBaseURL: cfg.WebhookBaseURL,
-				WebhookSecret:  cfg.WebhookSecret,
+				WebhookBaseURL:   cfg.WebhookBaseURL,
+				WebhookSecret:    cfg.WebhookSecret,
+				DeadlineTimezone: cfg.DeadlineTimezone,
 			},
 		)
 
