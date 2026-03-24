@@ -21,7 +21,7 @@ Group members can also query the bot directly:
 - `/standings` — current league table
 - `/streak` — active win/loss streaks
 - `/history <manager1> <manager2>` — head-to-head record between two managers (by rank or name prefix)
-- `/deadline` — next gameweek deadline in London time
+- `/deadline` — next gameweek deadline (configurable timezone, defaults to London)
 
 Commands are registered with Telegram on startup via the Bot API, so users see autocomplete suggestions when typing `/`. See [docs/telegram.md](docs/telegram.md) for full Telegram setup, webhook configuration, and how to add new commands.
 
@@ -210,6 +210,7 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 | `POLL_IDLE_INTERVAL` | No | Seconds between polls when idle (default: `21600` — 6 hours) |
 | `POLL_LIVE_INTERVAL` | No | Seconds between polls during a live gameweek (default: `900` — 15 min) |
 | `POLL_PROCESSING_INTERVAL` | No | Seconds between polls while results are processing (default: `600` — 10 min) |
+| `DEADLINE_TIMEZONE` | No | IANA timezone for `/deadline` display (default: `Europe/London`, e.g. `America/New_York`) |
 | `LOG_LEVEL` | No | `debug`, `info`, `warn`, `error` (default: `info`) |
 
 ## Project structure
