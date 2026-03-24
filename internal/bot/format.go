@@ -136,6 +136,9 @@ func formatH2HRecord(record stats.H2HRecord) string {
 // (default: Europe/London). The embedded tzdata in internal/config ensures
 // time.LoadLocation works in minimal container images.
 func formatDeadline(name string, t time.Time, loc *time.Location) string {
+	if loc == nil {
+		loc = time.UTC
+	}
 	return fmt.Sprintf("<b>%s</b>\nDeadline: %s",
 		esc(name), t.In(loc).Format("Mon 2 Jan, 15:04 MST"))
 }

@@ -249,7 +249,10 @@ func TestLoad_DeadlineTimezone(t *testing.T) {
 
 			// Verify the resolved location matches the expected IANA name.
 			// time.Location.String() returns the IANA name used to load it.
-			want, _ := time.LoadLocation(tt.wantName)
+			want, wantErr := time.LoadLocation(tt.wantName)
+			if wantErr != nil {
+				t.Fatalf("failed to load expected timezone %q for test: %v", tt.wantName, wantErr)
+			}
 			if cfg.DeadlineTimezone.String() != want.String() {
 				t.Errorf("DeadlineTimezone = %q, want %q", cfg.DeadlineTimezone, want)
 			}
