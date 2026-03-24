@@ -314,13 +314,13 @@ func (h *Handler) handleUpdate(ctx context.Context, upd update) {
 // grows to 10+ commands, a map-based dispatcher would be cleaner.
 func (h *Handler) dispatchCommand(ctx context.Context, command string, args []string) (string, error) {
 	switch command {
-	case "/standings":
+	case "/" + CmdStandings:
 		return handleStandings(ctx, h.store, h.leagueID)
-	case "/streak":
+	case "/" + CmdStreak:
 		return handleStreak(ctx, h.stats)
-	case "/history":
+	case "/" + CmdHistory:
 		return handleHistory(ctx, h.stats, h.store, h.leagueID, args)
-	case "/deadline":
+	case "/" + CmdDeadline:
 		return handleDeadline(ctx, h.fpl)
 	default:
 		// Unknown command — return empty string to silently ignore.

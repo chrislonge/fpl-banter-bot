@@ -10,6 +10,42 @@ import (
 	"github.com/chrislonge/fpl-banter-bot/internal/store"
 )
 
+// ---------------------------------------------------------------------------
+// Command name constants and metadata
+// ---------------------------------------------------------------------------
+//
+// Go pattern — SHARED CONSTANTS AS SINGLE SOURCE OF TRUTH:
+//
+// These constants are used by both the dispatchCommand switch (routing)
+// and the Commands slice (Telegram API registration + documentation).
+// By sharing identifiers, there's no second list that can drift out of
+// sync. A test validates that every constant has an entry in Commands
+// and a case in dispatchCommand.
+
+const (
+	CmdStandings = "standings"
+	CmdStreak    = "streak"
+	CmdHistory   = "history"
+	CmdDeadline  = "deadline"
+)
+
+// CommandDef describes a bot command for registration with Telegram's
+// setMyCommands API. The Name field is the command without the leading
+// slash (e.g. "standings", not "/standings").
+type CommandDef struct {
+	Name        string
+	Description string
+}
+
+// Commands is the authoritative list of supported bot commands.
+// Used for Telegram's setMyCommands API and as documentation.
+var Commands = []CommandDef{
+	{Name: CmdStandings, Description: "Current league standings table"},
+	{Name: CmdStreak, Description: "Active win and loss streaks"},
+	{Name: CmdHistory, Description: "H2H record between two managers"},
+	{Name: CmdDeadline, Description: "Next gameweek deadline"},
+}
+
 // handleStandings fetches the latest standings and returns a formatted table.
 //
 // Go pattern — FREE FUNCTION WITH EXPLICIT DEPS:

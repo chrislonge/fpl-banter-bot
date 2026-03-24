@@ -23,6 +23,8 @@ Group members can also query the bot directly:
 - `/history <manager1> <manager2>` — head-to-head record between two managers (by rank or name prefix)
 - `/deadline` — next gameweek deadline in London time
 
+Commands are registered with Telegram on startup via the Bot API, so users see autocomplete suggestions when typing `/`. See [docs/telegram.md](docs/telegram.md) for full Telegram setup, webhook configuration, and how to add new commands.
+
 ## Architecture
 
 ```mermaid
