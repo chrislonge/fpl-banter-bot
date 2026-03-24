@@ -104,11 +104,12 @@ type chat struct {
 // backward-compatible — you add a field with a zero-value default. In
 // Swift this is the same idea as a Configuration struct with memberwise init.
 type Config struct {
-	LeagueID       int64
-	ChatID         string
-	Port           int
-	WebhookBaseURL string
-	WebhookSecret  string
+	LeagueID         int64
+	ChatID           string
+	Port             int
+	WebhookBaseURL   string
+	WebhookSecret    string
+	DeadlineTimezone *time.Location // resolved IANA timezone for /deadline display
 }
 
 // Handler is the core bot server. It routes incoming Telegram updates to
@@ -120,11 +121,12 @@ type Handler struct {
 	fpl    FPLQuerier
 	poller PollerStatusProvider
 
-	leagueID      int64
-	chatID        string
-	port          int
-	webhookSecret string
-	webhookURL    string // full registered URL: base + /webhook/ + secret
+	leagueID         int64
+	chatID           string
+	port             int
+	webhookSecret    string
+	webhookURL       string         // full registered URL: base + /webhook/ + secret
+	deadlineTimezone *time.Location // IANA timezone for /deadline display
 }
 
 // New creates a Handler with all its dependencies.
@@ -141,6 +143,14 @@ func New(
 	poller PollerStatusProvider,
 	cfg Config,
 ) *Handler {
+	// Default to UTC if no timezone was provided. This guards against callers
+	// constructing a zero-value Config (e.g., in tests or alternative mains)
+	// without setting DeadlineTimezone.
+	tz := cfg.DeadlineTimezone
+	if tz == nil {
+		tz = time.UTC
+	}
+
 	webhookURL := strings.TrimRight(cfg.WebhookBaseURL, "/") + "/webhook/" + cfg.WebhookSecret
 	return &Handler{
 		tg:            tg,
@@ -151,8 +161,9 @@ func New(
 		leagueID:      cfg.LeagueID,
 		chatID:        cfg.ChatID,
 		port:          cfg.Port,
-		webhookSecret: cfg.WebhookSecret,
-		webhookURL:    webhookURL,
+		webhookSecret:    cfg.WebhookSecret,
+		webhookURL:       webhookURL,
+		deadlineTimezone: tz,
 	}
 }
 
@@ -321,7 +332,7 @@ func (h *Handler) dispatchCommand(ctx context.Context, command string, args []st
 	case "/" + CmdHistory:
 		return handleHistory(ctx, h.stats, h.store, h.leagueID, args)
 	case "/" + CmdDeadline:
-		return handleDeadline(ctx, h.fpl)
+		return handleDeadline(ctx, h.fpl, h.deadlineTimezone)
 	default:
 		// Unknown command — return empty string to silently ignore.
 		return "", nil

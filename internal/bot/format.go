@@ -13,22 +13,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	// Go pattern — BLANK IMPORT FOR SIDE EFFECTS:
-	//
-	// import _ "time/tzdata" causes the Go compiler to embed the entire IANA
-	// timezone database (~450KB) into the binary. Without this, time.LoadLocation
-	// reads from the filesystem (/usr/share/zoneinfo), which doesn't exist in
-	// scratch-based Docker images.
-	//
-	// The blank identifier _ means "import for side effects only" — the package's
-	// init() function runs (registering the embedded tzdata), but we don't call
-	// any of its exported functions directly. This is the same pattern used by
-	// database drivers (e.g., import _ "github.com/lib/pq").
-	//
-	// In Swift, the closest analog is a module that registers itself via a static
-	// initializer — you import it, and its side effect (registration) just happens.
-	_ "time/tzdata"
-
 	"github.com/chrislonge/fpl-banter-bot/internal/stats"
 	"github.com/chrislonge/fpl-banter-bot/internal/store"
 	"github.com/chrislonge/fpl-banter-bot/pkg/notify"
@@ -146,19 +130,17 @@ func formatH2HRecord(record stats.H2HRecord) string {
 	return b.String()
 }
 
-// formatDeadline renders the next gameweek deadline in London time.
+// formatDeadline renders the next gameweek deadline in the configured timezone.
 //
-// The time is displayed in Europe/London because FPL is a Premier League
-// game and all official deadlines are communicated in UK time. The embedded
-// tzdata (from the blank import above) ensures this works in scratch images.
-func formatDeadline(name string, t time.Time) string {
-	london, err := time.LoadLocation("Europe/London")
-	if err != nil {
-		// This should never happen with embedded tzdata, but fail gracefully.
-		return fmt.Sprintf("<b>%s</b>\nDeadline: %s", esc(name), t.Format("Mon 2 Jan, 15:04 MST"))
+// The timezone is resolved once at startup from the DEADLINE_TIMEZONE env var
+// (default: Europe/London). The embedded tzdata in internal/config ensures
+// time.LoadLocation works in minimal container images.
+func formatDeadline(name string, t time.Time, loc *time.Location) string {
+	if loc == nil {
+		loc = time.UTC
 	}
 	return fmt.Sprintf("<b>%s</b>\nDeadline: %s",
-		esc(name), t.In(london).Format("Mon 2 Jan, 15:04 MST"))
+		esc(name), t.In(loc).Format("Mon 2 Jan, 15:04 MST"))
 }
 
 // esc escapes HTML special characters in user-supplied text.

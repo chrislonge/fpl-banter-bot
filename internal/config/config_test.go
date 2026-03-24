@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoad_TelegramConfig(t *testing.T) {
@@ -192,6 +193,68 @@ func TestLoad_WebhookConfig(t *testing.T) {
 
 			if tt.wantPort != 0 && cfg.WebhookPort != tt.wantPort {
 				t.Errorf("WebhookPort = %d, want %d", cfg.WebhookPort, tt.wantPort)
+			}
+		})
+	}
+}
+
+func TestLoad_DeadlineTimezone(t *testing.T) {
+	tests := []struct {
+		name     string
+		tzValue  string // env var value; empty means unset
+		wantName string // expected *time.Location.String()
+		wantErr  string
+	}{
+		{
+			name:     "unset defaults to Europe/London",
+			tzValue:  "",
+			wantName: "Europe/London",
+		},
+		{
+			name:     "valid override",
+			tzValue:  "America/New_York",
+			wantName: "America/New_York",
+		},
+		{
+			name:    "invalid timezone fails fast",
+			tzValue: "Fake/Zone",
+			wantErr: "not a valid IANA timezone",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Set required env vars.
+			t.Setenv("DATABASE_URL", "postgres://test@localhost/test")
+			t.Setenv("FPL_LEAGUE_ID", "123")
+			t.Setenv("TELEGRAM_BOT_TOKEN", "")
+			t.Setenv("TELEGRAM_CHAT_ID", "")
+			t.Setenv("DEADLINE_TIMEZONE", tt.tzValue)
+
+			cfg, err := Load()
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got %q", tt.wantErr, err.Error())
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			// Verify the resolved location matches the expected IANA name.
+			// time.Location.String() returns the IANA name used to load it.
+			want, wantErr := time.LoadLocation(tt.wantName)
+			if wantErr != nil {
+				t.Fatalf("failed to load expected timezone %q for test: %v", tt.wantName, wantErr)
+			}
+			if cfg.DeadlineTimezone.String() != want.String() {
+				t.Errorf("DeadlineTimezone = %q, want %q", cfg.DeadlineTimezone, want)
 			}
 		})
 	}

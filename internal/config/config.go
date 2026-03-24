@@ -8,6 +8,12 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
+
+	// Embed the IANA timezone database into the binary so that
+	// time.LoadLocation works in minimal container images (e.g., scratch,
+	// distroless) that lack /usr/share/zoneinfo on the filesystem.
+	_ "time/tzdata"
 )
 
 // Config holds all application configuration. Fields are populated from
@@ -38,6 +44,9 @@ type Config struct {
 
 	// Logging
 	LogLevel string
+
+	// Display settings
+	DeadlineTimezone *time.Location // IANA timezone for /deadline display (default: Europe/London)
 }
 
 // Load reads environment variables and returns a validated Config.
@@ -112,6 +121,15 @@ func Load() (Config, error) {
 		webhookSecret = fmt.Sprintf("%x", b)
 	}
 
+	// Resolve the deadline display timezone. Defaults to Europe/London because
+	// FPL is a Premier League product and deadlines are communicated in UK time.
+	// Operators can override this (e.g., "America/New_York") for their group.
+	tzName := getEnvOrDefault("DEADLINE_TIMEZONE", "Europe/London")
+	deadlineTZ, err := time.LoadLocation(tzName)
+	if err != nil {
+		return Config{}, fmt.Errorf("DEADLINE_TIMEZONE %q is not a valid IANA timezone: %w", tzName, err)
+	}
+
 	return Config{
 		FPLLeagueID:            leagueID,
 		FPLLeagueType:          getEnvOrDefault("FPL_LEAGUE_TYPE", "h2h"),
@@ -126,6 +144,7 @@ func Load() (Config, error) {
 		PollLiveInterval:       getEnvAsIntOrDefault("POLL_LIVE_INTERVAL", 900),
 		PollProcessingInterval: getEnvAsIntOrDefault("POLL_PROCESSING_INTERVAL", 600),
 		LogLevel:               getEnvOrDefault("LOG_LEVEL", "info"),
+		DeadlineTimezone:       deadlineTZ,
 	}, nil
 }
 

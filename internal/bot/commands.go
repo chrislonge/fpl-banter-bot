@@ -140,7 +140,11 @@ func handleHistory(ctx context.Context, sq StatsQuerier, s LeagueStore, leagueID
 
 // handleDeadline fetches the bootstrap data and finds the next gameweek
 // deadline to display.
-func handleDeadline(ctx context.Context, fq FPLQuerier) (string, error) {
+func handleDeadline(ctx context.Context, fq FPLQuerier, loc *time.Location) (string, error) {
+	if loc == nil {
+		loc = time.UTC
+	}
+
 	bootstrap, err := fq.GetBootstrap(ctx)
 	if err != nil {
 		return "", fmt.Errorf("get bootstrap: %w", err)
@@ -158,7 +162,7 @@ func handleDeadline(ctx context.Context, fq FPLQuerier) (string, error) {
 			return "", fmt.Errorf("parsing deadline for %s: %w", event.Name, err)
 		}
 
-		return formatDeadline(event.Name, deadline), nil
+		return formatDeadline(event.Name, deadline, loc), nil
 	}
 
 	return "No upcoming deadline found. The season may be over.", nil

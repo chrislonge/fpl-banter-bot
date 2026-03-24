@@ -31,6 +31,16 @@ import (
 // This is different from Swift/Kotlin mock libraries that auto-generate mocks
 // from protocols/interfaces.
 
+// mustLoadLocation loads an IANA timezone or panics. Safe in tests because
+// the tzdata_test.go blank import guarantees the embedded database is available.
+func mustLoadLocation(name string) *time.Location {
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		panic(fmt.Sprintf("time.LoadLocation(%q): %v", name, err))
+	}
+	return loc
+}
+
 type fakeTelegramBot struct {
 	mu   sync.Mutex
 	sent []sentMessage // records all SendRaw calls
@@ -119,11 +129,12 @@ func (f *fakePollerStatus) Status() (string, int) {
 
 func newTestHandler(tg *fakeTelegramBot, sq *fakeStatsQuerier, ls *fakeLeagueStore, fq *fakeFPLQuerier, ps *fakePollerStatus) *Handler {
 	return New(tg, sq, ls, fq, ps, Config{
-		LeagueID:       916670,
-		ChatID:         "-12345",
-		Port:           0,
-		WebhookBaseURL: "https://example.com",
-		WebhookSecret:  "test-secret",
+		LeagueID:         916670,
+		ChatID:           "-12345",
+		Port:             0,
+		WebhookBaseURL:   "https://example.com",
+		WebhookSecret:    "test-secret",
+		DeadlineTimezone: mustLoadLocation("Europe/London"),
 	})
 }
 
@@ -541,17 +552,32 @@ func TestHandleUpdate_CommandErrorReturnsGenericMessage(t *testing.T) {
 }
 
 func TestFormatDeadline(t *testing.T) {
-	// Parse a known deadline and verify it formats in London time.
+	// Parse a known deadline and verify it formats in the given timezone.
 	deadline, _ := time.Parse(time.RFC3339, "2026-01-15T11:30:00Z")
-	result := formatDeadline("Gameweek 21", deadline)
 
-	if !strings.Contains(result, "Gameweek 21") {
-		t.Errorf("result = %q, want 'Gameweek 21'", result)
-	}
-	// In winter, London is UTC (GMT), so 11:30 UTC = 11:30 GMT.
-	if !strings.Contains(result, "11:30") {
-		t.Errorf("result = %q, want '11:30'", result)
-	}
+	t.Run("London timezone", func(t *testing.T) {
+		result := formatDeadline("Gameweek 21", deadline, mustLoadLocation("Europe/London"))
+
+		if !strings.Contains(result, "Gameweek 21") {
+			t.Errorf("result = %q, want 'Gameweek 21'", result)
+		}
+		// In winter, London is UTC (GMT), so 11:30 UTC = 11:30 GMT.
+		if !strings.Contains(result, "11:30") {
+			t.Errorf("result = %q, want '11:30'", result)
+		}
+	})
+
+	t.Run("Eastern timezone", func(t *testing.T) {
+		result := formatDeadline("Gameweek 21", deadline, mustLoadLocation("America/New_York"))
+
+		// In winter, Eastern is UTC-5, so 11:30 UTC = 06:30 EST.
+		if !strings.Contains(result, "06:30") {
+			t.Errorf("result = %q, want '06:30'", result)
+		}
+		if !strings.Contains(result, "EST") {
+			t.Errorf("result = %q, want 'EST' timezone abbreviation", result)
+		}
+	})
 }
 
 func TestFormatStandings(t *testing.T) {
