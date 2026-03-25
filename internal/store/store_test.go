@@ -448,6 +448,35 @@ func TestUpsertAndGetGameweekAward(t *testing.T) {
 	}
 }
 
+func TestSaveGameweekAwards_RejectsMismatchedRows(t *testing.T) {
+	truncateTables(t)
+	ctx := context.Background()
+
+	seedLeague(t, 100, "Test League", "h2h")
+	seedManager(t, 100, 1001, "Alice", "Alice FC")
+
+	err := testStore.SaveGameweekAwards(ctx, 100, 5, []store.GameweekAward{
+		{
+			LeagueID:    999,
+			EventID:     6,
+			AwardKey:    "manager_of_the_week",
+			ManagerID:   1001,
+			MetricValue: 76,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected mismatched league/event error")
+	}
+
+	awards, getErr := testStore.GetGameweekAwards(ctx, 100, 5)
+	if getErr != nil {
+		t.Fatalf("GetGameweekAwards: %v", getErr)
+	}
+	if len(awards) != 0 {
+		t.Fatalf("expected no awards after rejected save, got %+v", awards)
+	}
+}
+
 func TestSaveGameweekSnapshot(t *testing.T) {
 	truncateTables(t)
 	ctx := context.Background()
