@@ -276,6 +276,81 @@ func TestBuildGameweekAlertsSyntheticStandingsStillAllowStreaksAndChips(t *testi
 	}
 }
 
+func TestBuildGameweekAlertsReadOnly_DoesNotPersistAwards(t *testing.T) {
+	fs := &fakeStore{
+		standingsByEvent: map[int][]store.GameweekStanding{
+			2: {
+				{LeagueID: 916670, EventID: 2, ManagerID: 101, Rank: 1},
+				{LeagueID: 916670, EventID: 2, ManagerID: 202, Rank: 2},
+			},
+		},
+		managerStatsByEvent: map[int][]store.GameweekManagerStat{
+			2: {
+				{LeagueID: 916670, EventID: 2, ManagerID: 101, PointsOnBench: 4, CaptainElementID: intPtr(430), CaptainPoints: intPtr(13), CaptainMultiplier: intPtr(2)},
+				{LeagueID: 916670, EventID: 2, ManagerID: 202, PointsOnBench: 2, CaptainElementID: intPtr(328), CaptainPoints: intPtr(3), CaptainMultiplier: intPtr(2)},
+			},
+		},
+		resultsByEvent: map[int][]store.H2HResult{
+			1: {
+				{LeagueID: 916670, EventID: 1, Manager1ID: 101, Manager1Score: 55, Manager2ID: 202, Manager2Score: 45},
+			},
+			2: {
+				{LeagueID: 916670, EventID: 2, Manager1ID: 101, Manager1Score: 70, Manager2ID: 202, Manager2Score: 60},
+			},
+		},
+		metaByEvent: map[int]store.SnapshotMeta{
+			1: {LeagueID: 916670, EventID: 1, StandingsFidelity: "historical"},
+			2: {LeagueID: 916670, EventID: 2, StandingsFidelity: "historical"},
+		},
+		managers: []store.Manager{
+			{LeagueID: 916670, ID: 101, Name: "Alice", TeamName: "Alice FC"},
+			{LeagueID: 916670, ID: 202, Name: "Bob", TeamName: "Bob FC"},
+		},
+	}
+	engine := New(fs, 916670)
+
+	alerts, err := engine.BuildGameweekAlertsReadOnly(context.Background(), 2)
+	if err != nil {
+		t.Fatalf("BuildGameweekAlertsReadOnly: %v", err)
+	}
+	if len(alertsByKind(alerts, notify.AlertKindGameweekAwards)) != 1 {
+		t.Fatalf("expected a gameweek awards alert in %+v", alerts)
+	}
+	if fs.savedAwardsByEvent != nil {
+		t.Fatalf("expected no persisted awards in read-only mode, got %+v", fs.savedAwardsByEvent)
+	}
+}
+
+func TestBuildGameweekAlerts_NoResultsDoesNotPersistEmptyAwards(t *testing.T) {
+	fs := &fakeStore{
+		standingsByEvent: map[int][]store.GameweekStanding{
+			2: {
+				{LeagueID: 916670, EventID: 2, ManagerID: 101, Rank: 1},
+				{LeagueID: 916670, EventID: 2, ManagerID: 202, Rank: 2},
+			},
+		},
+		metaByEvent: map[int]store.SnapshotMeta{
+			2: {LeagueID: 916670, EventID: 2, StandingsFidelity: "historical"},
+		},
+		managers: []store.Manager{
+			{LeagueID: 916670, ID: 101, Name: "Alice", TeamName: "Alice FC"},
+			{LeagueID: 916670, ID: 202, Name: "Bob", TeamName: "Bob FC"},
+		},
+	}
+	engine := New(fs, 916670)
+
+	alerts, err := engine.BuildGameweekAlerts(context.Background(), 2)
+	if err != nil {
+		t.Fatalf("BuildGameweekAlerts: %v", err)
+	}
+	if len(alertsByKind(alerts, notify.AlertKindGameweekAwards)) != 0 {
+		t.Fatalf("expected no awards alert when results are missing, got %+v", alerts)
+	}
+	if fs.savedAwardsByEvent != nil {
+		t.Fatalf("expected no persisted awards when no rows were computed, got %+v", fs.savedAwardsByEvent)
+	}
+}
+
 func TestGetCurrentStreaks(t *testing.T) {
 	engine := New(&fakeStore{
 		resultsByEvent: map[int][]store.H2HResult{
