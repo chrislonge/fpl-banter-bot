@@ -1,10 +1,10 @@
 # fpl-banter-bot
 
-A self-hosted Fantasy Premier League banter bot for head-to-head mini-leagues. It watches the FPL API, stores each finished gameweek in Postgres, posts a recap to Telegram, and answers a small set of league commands on demand.
+A self-hosted Fantasy Premier League banter bot for head-to-head mini-leagues. It watches the FPL API, stores finished gameweeks in Postgres, posts an awards-first recap to Telegram, and answers a small set of league commands on demand.
 
 ## What the bot does
 
-After a gameweek finalizes, the bot builds a single recap that leads with a gameweek awards ceremony and then follows with the rest of the weekly banter:
+After a gameweek finalizes, the bot builds one recap message that leads with an awards ceremony and then follows with the rest of the weekly banter:
 
 - `🏆 Manager of the Week`
 - `💩 Wooden Spoon`
@@ -52,6 +52,7 @@ flowchart TB
     end
 
     MAIN --> POLLER
+    MAIN --> BOT
     POLLER --> CLIENT
     CLIENT --> FPL
     POLLER --> STORE
@@ -60,12 +61,14 @@ flowchart TB
     STATS --> STORE
     STATS --> NOTIFY
     NOTIFY --> TG
-    USER --> WEB
+    USER --> TG
+    TG --> WEB
     WEB --> BOT
     BOT --> STORE
     BOT --> STATS
     BOT --> CLIENT
     BOT --> TG
+    TG --> USER
 ```
 
 There are two main paths through the system:
@@ -163,6 +166,8 @@ Users in the configured Telegram chat can run:
 
 Commands are registered with Telegram on startup, so users get autocomplete in chat.
 
+To resend a stored recap for a previous gameweek, use `cmd/notify-test` from your workstation or server. There is not yet an in-chat `/recap <gw>` command.
+
 ## Configuration
 
 All configuration comes from environment variables. See [`.env.example`](.env.example) for the full template.
@@ -235,6 +240,14 @@ This is the fastest way to verify the awards-first recap before posting to Teleg
 - run `make notify-test DRY_RUN=1` or `VERIFY=1 ... make notify-test` on your laptop
 - deploy to the Pi and run `make docker-backfill`
 
+To send a stored recap for a specific gameweek to Telegram instead of previewing it, run:
+
+```bash
+make notify-test GW=31
+```
+
+Use `DRY_RUN=1` if you want to preview the exact message without sending it.
+
 ### Run the full test suite
 
 ```bash
@@ -273,6 +286,8 @@ The bot is a good fit for a Raspberry Pi or any small always-on Linux host. Dock
 make deploy
 make docker-backfill
 ```
+
+`make docker-backfill` rebuilds the one-shot backfill image before running it, which keeps it in sync with the latest checked-out code.
 
 If your bot runs in containers, set `DATABASE_URL` to use the Postgres service name from Compose, for example `postgres://fplbot:password@db:5432/fplbanterbot?sslmode=disable`.
 
