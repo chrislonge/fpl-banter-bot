@@ -21,15 +21,31 @@ type Store interface {
 	GetChipUsage(ctx context.Context, leagueID int64, eventID int) ([]store.ChipUsage, error)
 	GetH2HResults(ctx context.Context, leagueID int64, eventID int) ([]store.H2HResult, error)
 	GetH2HResultsRange(ctx context.Context, leagueID int64, fromEvent int, toEvent int) ([]store.H2HResult, error)
+	GetGameweekManagerStats(ctx context.Context, leagueID int64, eventID int) ([]store.GameweekManagerStat, error)
 	GetManagers(ctx context.Context, leagueID int64) ([]store.Manager, error)
 	GetLatestEventID(ctx context.Context, leagueID int64) (int, error)
 	GetSnapshotMeta(ctx context.Context, leagueID int64, eventID int) (store.SnapshotMeta, error)
+	SaveGameweekAwards(ctx context.Context, leagueID int64, eventID int, awards []store.GameweekAward) error
+}
+
+// PlayerLookup provides optional current-season player display names.
+// Awards fall back gracefully when this data is unavailable.
+type PlayerLookup interface {
+	PlayerNames(ctx context.Context) (map[int]notify.PlayerRef, error)
+}
+
+// PlayerLookupFunc adapts a function to the PlayerLookup interface.
+type PlayerLookupFunc func(ctx context.Context) (map[int]notify.PlayerRef, error)
+
+func (f PlayerLookupFunc) PlayerNames(ctx context.Context) (map[int]notify.PlayerRef, error) {
+	return f(ctx)
 }
 
 // Engine computes alert-worthy stats for a single league.
 type Engine struct {
-	store    Store
-	leagueID int64
+	store        Store
+	leagueID     int64
+	playerLookup PlayerLookup
 }
 
 // CurrentStreak describes a manager's active win or loss streak.
@@ -61,14 +77,31 @@ type eventOutcome struct {
 
 // New constructs a stats engine for one league.
 func New(store Store, leagueID int64) *Engine {
+	return NewWithPlayerLookup(store, leagueID, nil)
+}
+
+// NewWithPlayerLookup constructs a stats engine with optional player lookup.
+func NewWithPlayerLookup(store Store, leagueID int64, playerLookup PlayerLookup) *Engine {
 	return &Engine{
-		store:    store,
-		leagueID: leagueID,
+		store:        store,
+		leagueID:     leagueID,
+		playerLookup: playerLookup,
 	}
 }
 
 // BuildGameweekAlerts computes all proactive alerts for a single gameweek.
 func (e *Engine) BuildGameweekAlerts(ctx context.Context, eventID int) ([]notify.Alert, error) {
+	return e.buildGameweekAlerts(ctx, eventID, true)
+}
+
+// BuildGameweekAlertsReadOnly computes proactive alerts without persisting
+// any derived award rows. This is used by diagnostic tooling such as
+// notify-test verification passes.
+func (e *Engine) BuildGameweekAlertsReadOnly(ctx context.Context, eventID int) ([]notify.Alert, error) {
+	return e.buildGameweekAlerts(ctx, eventID, false)
+}
+
+func (e *Engine) buildGameweekAlerts(ctx context.Context, eventID int, persistAwards bool) ([]notify.Alert, error) {
 	managerByID, err := e.getManagerDirectory(ctx)
 	if err != nil {
 		return nil, err
@@ -89,7 +122,14 @@ func (e *Engine) BuildGameweekAlerts(ctx context.Context, eventID int) ([]notify
 		return nil, fmt.Errorf("get h2h results for event %d: %w", eventID, err)
 	}
 
-	alerts := make([]notify.Alert, 0, len(currentStandings)+len(currentChips)+len(currentResults)+2)
+	currentManagerStats, err := e.store.GetGameweekManagerStats(ctx, e.leagueID, eventID)
+	if err != nil {
+		return nil, fmt.Errorf("get manager stats for event %d: %w", eventID, err)
+	}
+
+	playerByID := e.getPlayerDirectory(ctx)
+
+	alerts := make([]notify.Alert, 0, len(currentStandings)+len(currentChips)+len(currentResults)+3)
 
 	currentHistorical, err := e.hasHistoricalStandings(ctx, eventID)
 	if err != nil {
@@ -169,12 +209,20 @@ func (e *Engine) BuildGameweekAlerts(ctx context.Context, eventID int) ([]notify
 		})
 	}
 
-	if summary, ok := buildGameweekSummary(managerByID, currentResults, prevRanks, prevHistorical); ok {
+	plotTwist := buildPlotTwist(managerByID, currentResults, prevRanks, prevHistorical)
+
+	awardsAlert, awardRows := buildGameweekAwards(e.leagueID, eventID, managerByID, playerByID, currentResults, currentManagerStats, plotTwist)
+	if persistAwards && len(awardRows) > 0 {
+		if err := e.store.SaveGameweekAwards(ctx, e.leagueID, eventID, awardRows); err != nil {
+			return nil, fmt.Errorf("save awards for event %d: %w", eventID, err)
+		}
+	}
+	if awardsAlert != nil {
 		alerts = append(alerts, notify.Alert{
-			Kind:            notify.AlertKindGameweekSummary,
-			LeagueID:        e.leagueID,
-			EventID:         eventID,
-			GameweekSummary: summary,
+			Kind:           notify.AlertKindGameweekAwards,
+			LeagueID:       e.leagueID,
+			EventID:        eventID,
+			GameweekAwards: awardsAlert,
 		})
 	}
 
@@ -300,6 +348,18 @@ func (e *Engine) getManagerDirectory(ctx context.Context) (map[int64]notify.Mana
 	return managerByID, nil
 }
 
+func (e *Engine) getPlayerDirectory(ctx context.Context) map[int]notify.PlayerRef {
+	if e.playerLookup == nil {
+		return map[int]notify.PlayerRef{}
+	}
+
+	playerByID, err := e.playerLookup.PlayerNames(ctx)
+	if err != nil {
+		return map[int]notify.PlayerRef{}
+	}
+	return playerByID
+}
+
 func (e *Engine) hasHistoricalStandings(ctx context.Context, eventID int) (bool, error) {
 	meta, err := e.store.GetSnapshotMeta(ctx, e.leagueID, eventID)
 	if err != nil {
@@ -404,48 +464,12 @@ func buildCurrentStreaks(managerByID map[int64]notify.ManagerRef, results []stor
 	return streaks
 }
 
-func buildGameweekSummary(managerByID map[int64]notify.ManagerRef, results []store.H2HResult, prevRanks map[int64]int, prevHistorical bool) (*notify.GameweekSummaryAlert, bool) {
-	type participantScore struct {
-		ManagerID int64
-		Score     int
-	}
-
+func buildPlotTwist(managerByID map[int64]notify.ManagerRef, results []store.H2HResult, prevRanks map[int64]int, prevHistorical bool) *notify.UpsetAlert {
 	if len(results) == 0 {
-		return nil, false
+		return nil
 	}
-
-	participants := make([]participantScore, 0, len(results)*2)
-	for _, result := range results {
-		participants = append(participants,
-			participantScore{ManagerID: result.Manager1ID, Score: result.Manager1Score},
-			participantScore{ManagerID: result.Manager2ID, Score: result.Manager2Score},
-		)
-	}
-
-	high := participants[0]
-	low := participants[0]
-	for _, participant := range participants[1:] {
-		if participant.Score > high.Score || (participant.Score == high.Score && participant.ManagerID < high.ManagerID) {
-			high = participant
-		}
-		if participant.Score < low.Score || (participant.Score == low.Score && participant.ManagerID < low.ManagerID) {
-			low = participant
-		}
-	}
-
-	summary := &notify.GameweekSummaryAlert{
-		HighScorer: notify.ManagerScore{
-			Manager: managerRef(managerByID, high.ManagerID),
-			Score:   high.Score,
-		},
-		LowScorer: notify.ManagerScore{
-			Manager: managerRef(managerByID, low.ManagerID),
-			Score:   low.Score,
-		},
-	}
-
 	if !prevHistorical {
-		return summary, true
+		return nil
 	}
 
 	var bestUpset *notify.UpsetAlert
@@ -494,8 +518,7 @@ func buildGameweekSummary(managerByID map[int64]notify.ManagerRef, results []sto
 		}
 	}
 
-	summary.BiggestUpset = bestUpset
-	return summary, true
+	return bestUpset
 }
 
 func ranksByManager(standings []store.GameweekStanding) map[int64]int {

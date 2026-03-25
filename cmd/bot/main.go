@@ -164,7 +164,9 @@ func main() {
 	var tgNotifier *telegram.Client
 
 	if cfg.TelegramConfigured {
-		statsEngine = stats.New(appStore, int64(cfg.FPLLeagueID))
+		playerLookup := newPlayerLookup(fplClient)
+
+		statsEngine = stats.NewWithPlayerLookup(appStore, int64(cfg.FPLLeagueID), playerLookup)
 		tgNotifier = telegram.New(
 			&http.Client{Timeout: 10 * time.Second},
 			cfg.TelegramBotToken,

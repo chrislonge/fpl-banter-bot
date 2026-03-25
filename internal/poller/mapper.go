@@ -8,6 +8,8 @@
 package poller
 
 import (
+	"fmt"
+
 	"github.com/chrislonge/fpl-banter-bot/internal/fpl"
 	"github.com/chrislonge/fpl-banter-bot/internal/store"
 )
@@ -147,4 +149,70 @@ func mapH2HResults(leagueID int64, eventID int, matches []fpl.H2HMatch) []store.
 		})
 	}
 	return results
+}
+
+func findGameweekHistory(current []fpl.GameweekHistory, eventID int) (fpl.GameweekHistory, bool) {
+	for _, gw := range current {
+		if gw.Event == eventID {
+			return gw, true
+		}
+	}
+	return fpl.GameweekHistory{}, false
+}
+
+func livePointsByElement(resp fpl.EventLiveResponse) map[int]int {
+	pointsByElement := make(map[int]int, len(resp.Elements))
+	for _, el := range resp.Elements {
+		if el.Stats.TotalPoints == nil {
+			continue
+		}
+		pointsByElement[el.ID] = *el.Stats.TotalPoints
+	}
+	return pointsByElement
+}
+
+func effectiveCaptainPick(picks []fpl.Pick) (fpl.Pick, bool) {
+	// FPL applies the vice-captain by moving the doubled/tripled multiplier
+	// onto the effective armband holder. That means a "captain" row can show
+	// multiplier 0 while the vice-captain row carries multiplier 2.
+	for _, pick := range picks {
+		if pick.Multiplier > 1 {
+			return pick, true
+		}
+	}
+	return fpl.Pick{}, false
+}
+
+func mapGameweekManagerStat(leagueID int64, eventID int, managerID int64, pointsOnBench int, picks []fpl.Pick, livePoints map[int]int) (store.GameweekManagerStat, error) {
+	captain, ok := effectiveCaptainPick(picks)
+	if !ok {
+		// Some historical/current-season FPL payloads leave both the captain and
+		// vice-captain at multiplier 0 after automatic substitutions. We still
+		// persist the bench fact and let the awards engine omit captain-specific
+		// awards for that gameweek rather than fail the whole snapshot/backfill.
+		return store.GameweekManagerStat{
+			LeagueID:      leagueID,
+			EventID:       eventID,
+			ManagerID:     managerID,
+			PointsOnBench: pointsOnBench,
+		}, nil
+	}
+
+	captainPoints, ok := livePoints[captain.Element]
+	if !ok {
+		return store.GameweekManagerStat{}, fmt.Errorf("manager %d: no live points for captain element %d", managerID, captain.Element)
+	}
+
+	captainElementID := captain.Element
+	captainMultiplier := captain.Multiplier
+
+	return store.GameweekManagerStat{
+		LeagueID:          leagueID,
+		EventID:           eventID,
+		ManagerID:         managerID,
+		PointsOnBench:     pointsOnBench,
+		CaptainElementID:  &captainElementID,
+		CaptainPoints:     &captainPoints,
+		CaptainMultiplier: &captainMultiplier,
+	}, nil
 }

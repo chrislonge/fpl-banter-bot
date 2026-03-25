@@ -105,3 +105,39 @@ type H2HResult struct {
 	Manager2Score int       // Manager 2's GW score
 	CreatedAt     time.Time // Row creation timestamp
 }
+
+// GameweekManagerStat stores the per-manager weekly facts needed for
+// awards. It is intentionally a focused read model rather than a full
+// copy of the FPL picks payload.
+type GameweekManagerStat struct {
+	LeagueID          int64     // FK to leagues
+	EventID           int       // Gameweek number
+	ManagerID         int64     // FK to managers
+	PointsOnBench     int       // Bench points left unused this GW
+	CaptainElementID  *int      // nil when captain data has not been stored yet
+	CaptainPoints     *int      // Player's raw points before captain multiplier
+	CaptainMultiplier *int      // 2 for captain, 3 for triple captain
+	CreatedAt         time.Time // Row creation timestamp
+}
+
+// GameweekAward stores one persisted award winner for one gameweek.
+// The composite PK enforces a single winner per award_key for v2.
+type GameweekAward struct {
+	LeagueID          int64     // FK to leagues
+	EventID           int       // Gameweek number
+	AwardKey          string    // Stable machine-readable award identifier
+	ManagerID         int64     // Primary winner / recipient
+	OpponentManagerID *int64    // Opponent when the award is matchup-specific
+	PlayerElementID   *int      // Player involved in the award, when applicable
+	MetricValue       int       // Numeric value used for season tracking
+	CreatedAt         time.Time // Row creation timestamp
+}
+
+// GameweekSnapshot groups the data persisted atomically for one gameweek.
+type GameweekSnapshot struct {
+	Standings    []GameweekStanding
+	Chips        []ChipUsage
+	Results      []H2HResult
+	ManagerStats []GameweekManagerStat
+	Meta         SnapshotMeta
+}

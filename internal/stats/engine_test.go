@@ -9,12 +9,14 @@ import (
 )
 
 type fakeStore struct {
-	standingsByEvent map[int][]store.GameweekStanding
-	chipsByEvent     map[int][]store.ChipUsage
-	resultsByEvent   map[int][]store.H2HResult
-	metaByEvent      map[int]store.SnapshotMeta
-	managers         []store.Manager
-	latestEventID    int
+	standingsByEvent    map[int][]store.GameweekStanding
+	chipsByEvent        map[int][]store.ChipUsage
+	resultsByEvent      map[int][]store.H2HResult
+	managerStatsByEvent map[int][]store.GameweekManagerStat
+	savedAwardsByEvent  map[int][]store.GameweekAward
+	metaByEvent         map[int]store.SnapshotMeta
+	managers            []store.Manager
+	latestEventID       int
 }
 
 func (f *fakeStore) GetStandings(_ context.Context, _ int64, eventID int) ([]store.GameweekStanding, error) {
@@ -37,6 +39,10 @@ func (f *fakeStore) GetH2HResultsRange(_ context.Context, _ int64, fromEvent int
 	return cloneSlice(results), nil
 }
 
+func (f *fakeStore) GetGameweekManagerStats(_ context.Context, _ int64, eventID int) ([]store.GameweekManagerStat, error) {
+	return cloneSlice(f.managerStatsByEvent[eventID]), nil
+}
+
 func (f *fakeStore) GetManagers(_ context.Context, _ int64) ([]store.Manager, error) {
 	return cloneSlice(f.managers), nil
 }
@@ -51,6 +57,14 @@ func (f *fakeStore) GetSnapshotMeta(_ context.Context, _ int64, eventID int) (st
 		return store.SnapshotMeta{}, store.ErrNotFound
 	}
 	return meta, nil
+}
+
+func (f *fakeStore) SaveGameweekAwards(_ context.Context, _ int64, eventID int, awards []store.GameweekAward) error {
+	if f.savedAwardsByEvent == nil {
+		f.savedAwardsByEvent = make(map[int][]store.GameweekAward)
+	}
+	f.savedAwardsByEvent[eventID] = cloneSlice(awards)
+	return nil
 }
 
 func TestBuildGameweekAlertsHistoricalRankChangesAndSummary(t *testing.T) {
@@ -72,6 +86,14 @@ func TestBuildGameweekAlertsHistoricalRankChangesAndSummary(t *testing.T) {
 		chipsByEvent: map[int][]store.ChipUsage{
 			2: {
 				{LeagueID: 916670, ManagerID: 303, EventID: 2, Chip: "wildcard"},
+			},
+		},
+		managerStatsByEvent: map[int][]store.GameweekManagerStat{
+			2: {
+				{LeagueID: 916670, EventID: 2, ManagerID: 101, PointsOnBench: 3, CaptainElementID: intPtr(430), CaptainPoints: intPtr(13), CaptainMultiplier: intPtr(2)},
+				{LeagueID: 916670, EventID: 2, ManagerID: 202, PointsOnBench: 8, CaptainElementID: intPtr(328), CaptainPoints: intPtr(2), CaptainMultiplier: intPtr(2)},
+				{LeagueID: 916670, EventID: 2, ManagerID: 303, PointsOnBench: 15, CaptainElementID: intPtr(430), CaptainPoints: intPtr(13), CaptainMultiplier: intPtr(2)},
+				{LeagueID: 916670, EventID: 2, ManagerID: 404, PointsOnBench: 6, CaptainElementID: intPtr(430), CaptainPoints: intPtr(13), CaptainMultiplier: intPtr(2)},
 			},
 		},
 		resultsByEvent: map[int][]store.H2HResult{
@@ -122,22 +144,24 @@ func TestBuildGameweekAlertsHistoricalRankChangesAndSummary(t *testing.T) {
 		t.Errorf("chip alert = %+v, want Charlie wildcard", chipAlerts[0].ChipUsage)
 	}
 
-	summaryAlerts := alertsByKind(alerts, notify.AlertKindGameweekSummary)
-	if len(summaryAlerts) != 1 {
-		t.Fatalf("len(summaryAlerts) = %d, want 1", len(summaryAlerts))
+	awardAlerts := alertsByKind(alerts, notify.AlertKindGameweekAwards)
+	if len(awardAlerts) != 1 {
+		t.Fatalf("len(awardAlerts) = %d, want 1", len(awardAlerts))
 	}
-	summary := summaryAlerts[0].GameweekSummary
-	if summary.HighScorer.Manager.ID != 101 || summary.HighScorer.Score != 70 {
-		t.Errorf("high scorer = %+v, want Alice 70", summary.HighScorer)
+	if awardAlerts[0].GameweekAwards == nil || awardAlerts[0].GameweekAwards.BenchWarmer == nil {
+		t.Fatalf("expected bench warmer award in %+v", awardAlerts[0].GameweekAwards)
 	}
-	if summary.LowScorer.Manager.ID != 303 || summary.LowScorer.Score != 40 {
-		t.Errorf("low scorer = %+v, want Charlie 40", summary.LowScorer)
+	if awardAlerts[0].GameweekAwards.BenchWarmer.Manager.ID != 303 {
+		t.Errorf("bench warmer winner = %d, want 303", awardAlerts[0].GameweekAwards.BenchWarmer.Manager.ID)
 	}
-	if summary.BiggestUpset == nil {
-		t.Fatal("summary.BiggestUpset = nil, want Dave over Charlie")
+	if awardAlerts[0].GameweekAwards.ArmbandOfShame == nil || awardAlerts[0].GameweekAwards.ArmbandOfShame.Manager.ID != 202 {
+		t.Errorf("armband of shame = %+v, want Bob", awardAlerts[0].GameweekAwards.ArmbandOfShame)
 	}
-	if summary.BiggestUpset.Winner.ID != 404 || summary.BiggestUpset.Loser.ID != 303 {
-		t.Errorf("biggest upset = %+v, want Dave over Charlie", summary.BiggestUpset)
+	if awardAlerts[0].GameweekAwards.PlotTwist == nil || awardAlerts[0].GameweekAwards.PlotTwist.Winner.ID != 404 || awardAlerts[0].GameweekAwards.PlotTwist.Loser.ID != 303 {
+		t.Errorf("plot twist = %+v, want Dave over Charlie", awardAlerts[0].GameweekAwards.PlotTwist)
+	}
+	if got := len(engine.store.(*fakeStore).savedAwardsByEvent[2]); got != 8 {
+		t.Errorf("saved awards count = %d, want 8", got)
 	}
 
 	h2hAlerts := alertsByKind(alerts, notify.AlertKindH2HResult)
@@ -171,6 +195,12 @@ func TestBuildGameweekAlertsSyntheticStandingsStillAllowStreaksAndChips(t *testi
 		chipsByEvent: map[int][]store.ChipUsage{
 			3: {
 				{LeagueID: 916670, ManagerID: 202, EventID: 3, Chip: "3xc"},
+			},
+		},
+		managerStatsByEvent: map[int][]store.GameweekManagerStat{
+			3: {
+				{LeagueID: 916670, EventID: 3, ManagerID: 101, PointsOnBench: 4, CaptainElementID: intPtr(430), CaptainPoints: intPtr(12), CaptainMultiplier: intPtr(2)},
+				{LeagueID: 916670, EventID: 3, ManagerID: 404, PointsOnBench: 11, CaptainElementID: intPtr(328), CaptainPoints: intPtr(1), CaptainMultiplier: intPtr(2)},
 			},
 		},
 		resultsByEvent: map[int][]store.H2HResult{
@@ -220,11 +250,86 @@ func TestBuildGameweekAlertsSyntheticStandingsStillAllowStreaksAndChips(t *testi
 		t.Errorf("chip alerts = %+v, want Bob chip alert", chipAlerts)
 	}
 
-	if got := len(alertsByKind(alerts, notify.AlertKindGameweekSummary)); got != 1 {
-		t.Fatalf("len(summaryAlerts) = %d, want 1", got)
+	if got := len(alertsByKind(alerts, notify.AlertKindGameweekAwards)); got != 1 {
+		t.Fatalf("len(awardAlerts) = %d, want 1", got)
 	}
 	if got := len(alertsByKind(alerts, notify.AlertKindH2HResult)); got != 1 {
 		t.Fatalf("len(h2hAlerts) = %d, want 1", got)
+	}
+}
+
+func TestBuildGameweekAlertsReadOnly_DoesNotPersistAwards(t *testing.T) {
+	fs := &fakeStore{
+		standingsByEvent: map[int][]store.GameweekStanding{
+			2: {
+				{LeagueID: 916670, EventID: 2, ManagerID: 101, Rank: 1},
+				{LeagueID: 916670, EventID: 2, ManagerID: 202, Rank: 2},
+			},
+		},
+		managerStatsByEvent: map[int][]store.GameweekManagerStat{
+			2: {
+				{LeagueID: 916670, EventID: 2, ManagerID: 101, PointsOnBench: 4, CaptainElementID: intPtr(430), CaptainPoints: intPtr(13), CaptainMultiplier: intPtr(2)},
+				{LeagueID: 916670, EventID: 2, ManagerID: 202, PointsOnBench: 2, CaptainElementID: intPtr(328), CaptainPoints: intPtr(3), CaptainMultiplier: intPtr(2)},
+			},
+		},
+		resultsByEvent: map[int][]store.H2HResult{
+			1: {
+				{LeagueID: 916670, EventID: 1, Manager1ID: 101, Manager1Score: 55, Manager2ID: 202, Manager2Score: 45},
+			},
+			2: {
+				{LeagueID: 916670, EventID: 2, Manager1ID: 101, Manager1Score: 70, Manager2ID: 202, Manager2Score: 60},
+			},
+		},
+		metaByEvent: map[int]store.SnapshotMeta{
+			1: {LeagueID: 916670, EventID: 1, StandingsFidelity: "historical"},
+			2: {LeagueID: 916670, EventID: 2, StandingsFidelity: "historical"},
+		},
+		managers: []store.Manager{
+			{LeagueID: 916670, ID: 101, Name: "Alice", TeamName: "Alice FC"},
+			{LeagueID: 916670, ID: 202, Name: "Bob", TeamName: "Bob FC"},
+		},
+	}
+	engine := New(fs, 916670)
+
+	alerts, err := engine.BuildGameweekAlertsReadOnly(context.Background(), 2)
+	if err != nil {
+		t.Fatalf("BuildGameweekAlertsReadOnly: %v", err)
+	}
+	if len(alertsByKind(alerts, notify.AlertKindGameweekAwards)) != 1 {
+		t.Fatalf("expected a gameweek awards alert in %+v", alerts)
+	}
+	if fs.savedAwardsByEvent != nil {
+		t.Fatalf("expected no persisted awards in read-only mode, got %+v", fs.savedAwardsByEvent)
+	}
+}
+
+func TestBuildGameweekAlerts_NoResultsDoesNotPersistEmptyAwards(t *testing.T) {
+	fs := &fakeStore{
+		standingsByEvent: map[int][]store.GameweekStanding{
+			2: {
+				{LeagueID: 916670, EventID: 2, ManagerID: 101, Rank: 1},
+				{LeagueID: 916670, EventID: 2, ManagerID: 202, Rank: 2},
+			},
+		},
+		metaByEvent: map[int]store.SnapshotMeta{
+			2: {LeagueID: 916670, EventID: 2, StandingsFidelity: "historical"},
+		},
+		managers: []store.Manager{
+			{LeagueID: 916670, ID: 101, Name: "Alice", TeamName: "Alice FC"},
+			{LeagueID: 916670, ID: 202, Name: "Bob", TeamName: "Bob FC"},
+		},
+	}
+	engine := New(fs, 916670)
+
+	alerts, err := engine.BuildGameweekAlerts(context.Background(), 2)
+	if err != nil {
+		t.Fatalf("BuildGameweekAlerts: %v", err)
+	}
+	if len(alertsByKind(alerts, notify.AlertKindGameweekAwards)) != 0 {
+		t.Fatalf("expected no awards alert when results are missing, got %+v", alerts)
+	}
+	if fs.savedAwardsByEvent != nil {
+		t.Fatalf("expected no persisted awards when no rows were computed, got %+v", fs.savedAwardsByEvent)
 	}
 }
 
@@ -361,4 +466,8 @@ func cloneSlice[T any](in []T) []T {
 	out := make([]T, len(in))
 	copy(out, in)
 	return out
+}
+
+func intPtr(v int) *int {
+	return &v
 }

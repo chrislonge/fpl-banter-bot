@@ -78,7 +78,7 @@ func TestMain(m *testing.M) {
 func truncateTables(t *testing.T) {
 	t.Helper()
 	_, err := testPool.Exec(context.Background(),
-		"TRUNCATE leagues, managers, gameweek_standings, chip_usage, h2h_results, gameweek_snapshot_meta CASCADE",
+		"TRUNCATE leagues, managers, gameweek_standings, chip_usage, h2h_results, gameweek_snapshot_meta, gameweek_manager_stats, gw_awards CASCADE",
 	)
 	if err != nil {
 		t.Fatalf("failed to truncate tables: %v", err)
@@ -112,6 +112,14 @@ func seedManager(t *testing.T, leagueID, id int64, name, teamName string) {
 	if err != nil {
 		t.Fatalf("failed to seed manager: %v", err)
 	}
+}
+
+func intPtr(v int) *int {
+	return &v
+}
+
+func int64Ptr(v int64) *int64 {
+	return &v
 }
 
 // ---------------------------------------------------------------------------
@@ -341,6 +349,134 @@ func TestGetH2HResultsRange(t *testing.T) {
 	}
 }
 
+func TestUpsertAndGetGameweekManagerStat(t *testing.T) {
+	truncateTables(t)
+	ctx := context.Background()
+
+	seedLeague(t, 100, "Test League", "h2h")
+	seedManager(t, 100, 1001, "Alice", "Alice FC")
+
+	stat := store.GameweekManagerStat{
+		LeagueID:          100,
+		EventID:           5,
+		ManagerID:         1001,
+		PointsOnBench:     12,
+		CaptainElementID:  intPtr(430),
+		CaptainPoints:     intPtr(13),
+		CaptainMultiplier: intPtr(2),
+	}
+	if err := testStore.UpsertGameweekManagerStat(ctx, stat); err != nil {
+		t.Fatalf("UpsertGameweekManagerStat: %v", err)
+	}
+
+	stats, err := testStore.GetGameweekManagerStats(ctx, 100, 5)
+	if err != nil {
+		t.Fatalf("GetGameweekManagerStats: %v", err)
+	}
+	if len(stats) != 1 {
+		t.Fatalf("len(stats) = %d, want 1", len(stats))
+	}
+	if stats[0].PointsOnBench != 12 {
+		t.Errorf("PointsOnBench = %d, want 12", stats[0].PointsOnBench)
+	}
+	if stats[0].CaptainElementID == nil || *stats[0].CaptainElementID != 430 {
+		t.Errorf("CaptainElementID = %v, want 430", stats[0].CaptainElementID)
+	}
+
+	stat.PointsOnBench = 8
+	stat.CaptainPoints = intPtr(7)
+	if err := testStore.UpsertGameweekManagerStat(ctx, stat); err != nil {
+		t.Fatalf("UpsertGameweekManagerStat (update): %v", err)
+	}
+
+	stats, err = testStore.GetGameweekManagerStats(ctx, 100, 5)
+	if err != nil {
+		t.Fatalf("GetGameweekManagerStats after update: %v", err)
+	}
+	if stats[0].PointsOnBench != 8 {
+		t.Errorf("PointsOnBench after update = %d, want 8", stats[0].PointsOnBench)
+	}
+	if stats[0].CaptainPoints == nil || *stats[0].CaptainPoints != 7 {
+		t.Errorf("CaptainPoints after update = %v, want 7", stats[0].CaptainPoints)
+	}
+}
+
+func TestUpsertAndGetGameweekAward(t *testing.T) {
+	truncateTables(t)
+	ctx := context.Background()
+
+	seedLeague(t, 100, "Test League", "h2h")
+	seedManager(t, 100, 1001, "Alice", "Alice FC")
+	seedManager(t, 100, 1002, "Bob", "Bob FC")
+
+	award := store.GameweekAward{
+		LeagueID:          100,
+		EventID:           5,
+		AwardKey:          "biggest_thrashing",
+		ManagerID:         1001,
+		OpponentManagerID: int64Ptr(1002),
+		PlayerElementID:   nil,
+		MetricValue:       22,
+	}
+	if err := testStore.UpsertGameweekAward(ctx, award); err != nil {
+		t.Fatalf("UpsertGameweekAward: %v", err)
+	}
+
+	awards, err := testStore.GetGameweekAwards(ctx, 100, 5)
+	if err != nil {
+		t.Fatalf("GetGameweekAwards: %v", err)
+	}
+	if len(awards) != 1 {
+		t.Fatalf("len(awards) = %d, want 1", len(awards))
+	}
+	if awards[0].AwardKey != "biggest_thrashing" || awards[0].MetricValue != 22 {
+		t.Errorf("award = %+v, want biggest_thrashing/22", awards[0])
+	}
+
+	award.ManagerID = 1002
+	award.MetricValue = 3
+	if err := testStore.UpsertGameweekAward(ctx, award); err != nil {
+		t.Fatalf("UpsertGameweekAward (update): %v", err)
+	}
+
+	awards, err = testStore.GetGameweekAwards(ctx, 100, 5)
+	if err != nil {
+		t.Fatalf("GetGameweekAwards after update: %v", err)
+	}
+	if awards[0].ManagerID != 1002 || awards[0].MetricValue != 3 {
+		t.Errorf("award after update = %+v, want manager 1002 metric 3", awards[0])
+	}
+}
+
+func TestSaveGameweekAwards_RejectsMismatchedRows(t *testing.T) {
+	truncateTables(t)
+	ctx := context.Background()
+
+	seedLeague(t, 100, "Test League", "h2h")
+	seedManager(t, 100, 1001, "Alice", "Alice FC")
+
+	err := testStore.SaveGameweekAwards(ctx, 100, 5, []store.GameweekAward{
+		{
+			LeagueID:    999,
+			EventID:     6,
+			AwardKey:    "manager_of_the_week",
+			ManagerID:   1001,
+			MetricValue: 76,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected mismatched league/event error")
+	}
+
+	awards, getErr := testStore.GetGameweekAwards(ctx, 100, 5)
+	if getErr != nil {
+		t.Fatalf("GetGameweekAwards: %v", getErr)
+	}
+	if len(awards) != 0 {
+		t.Fatalf("expected no awards after rejected save, got %+v", awards)
+	}
+}
+
 func TestSaveGameweekSnapshot(t *testing.T) {
 	truncateTables(t)
 	ctx := context.Background()
@@ -361,12 +497,29 @@ func TestSaveGameweekSnapshot(t *testing.T) {
 	results := []store.H2HResult{
 		{LeagueID: 100, EventID: 5, Manager1ID: 1001, Manager1Score: 65, Manager2ID: 1002, Manager2Score: 48},
 	}
-
-	meta := store.SnapshotMeta{
-		LeagueID: 100, EventID: 5,
-		Source: "live", StandingsFidelity: "historical",
+	managerStats := []store.GameweekManagerStat{
+		{
+			LeagueID:          100,
+			EventID:           5,
+			ManagerID:         1001,
+			PointsOnBench:     9,
+			CaptainElementID:  intPtr(430),
+			CaptainPoints:     intPtr(13),
+			CaptainMultiplier: intPtr(2),
+		},
 	}
-	if err := testStore.SaveGameweekSnapshot(ctx, standings, chips, results, meta); err != nil {
+
+	snap := store.GameweekSnapshot{
+		Standings:    standings,
+		Chips:        chips,
+		Results:      results,
+		ManagerStats: managerStats,
+		Meta: store.SnapshotMeta{
+			LeagueID: 100, EventID: 5,
+			Source: "live", StandingsFidelity: "historical",
+		},
+	}
+	if err := testStore.SaveGameweekSnapshot(ctx, snap); err != nil {
 		t.Fatalf("SaveGameweekSnapshot: %v", err)
 	}
 
@@ -393,6 +546,14 @@ func TestSaveGameweekSnapshot(t *testing.T) {
 	}
 	if len(gotResults) != 1 {
 		t.Errorf("len(results) = %d, want 1", len(gotResults))
+	}
+
+	gotStats, err := testStore.GetGameweekManagerStats(ctx, 100, 5)
+	if err != nil {
+		t.Fatalf("GetGameweekManagerStats: %v", err)
+	}
+	if len(gotStats) != 1 || gotStats[0].PointsOnBench != 9 {
+		t.Errorf("manager stats = %+v, want one row with bench 9", gotStats)
 	}
 
 	// Verify metadata was written atomically with the snapshot.
@@ -423,16 +584,21 @@ func TestSaveGameweekSnapshotIdempotent(t *testing.T) {
 		{LeagueID: 100, EventID: 5, Manager1ID: 1001, Manager1Score: 65, Manager2ID: 1002, Manager2Score: 48},
 	}
 
-	meta := store.SnapshotMeta{
-		LeagueID: 100, EventID: 5,
-		Source: "live", StandingsFidelity: "historical",
+	snap := store.GameweekSnapshot{
+		Standings: standings,
+		Chips:     chips,
+		Results:   results,
+		Meta: store.SnapshotMeta{
+			LeagueID: 100, EventID: 5,
+			Source: "live", StandingsFidelity: "historical",
+		},
 	}
 
 	// Save twice — should succeed both times with no duplicates.
-	if err := testStore.SaveGameweekSnapshot(ctx, standings, chips, results, meta); err != nil {
+	if err := testStore.SaveGameweekSnapshot(ctx, snap); err != nil {
 		t.Fatalf("first SaveGameweekSnapshot: %v", err)
 	}
-	if err := testStore.SaveGameweekSnapshot(ctx, standings, chips, results, meta); err != nil {
+	if err := testStore.SaveGameweekSnapshot(ctx, snap); err != nil {
 		t.Fatalf("second SaveGameweekSnapshot: %v", err)
 	}
 
@@ -659,6 +825,73 @@ func TestGetStoredEventIDs_Multiple(t *testing.T) {
 	}
 }
 
+func TestGetStoredManagerStatEventIDs_Multiple(t *testing.T) {
+	truncateTables(t)
+	ctx := context.Background()
+
+	seedLeague(t, 100, "Test League", "h2h")
+	seedManager(t, 100, 1001, "Alice", "Alice FC")
+
+	for _, gw := range []int{8, 3, 5} {
+		if err := testStore.UpsertGameweekManagerStat(ctx, store.GameweekManagerStat{
+			LeagueID:      100,
+			EventID:       gw,
+			ManagerID:     1001,
+			PointsOnBench: 4,
+		}); err != nil {
+			t.Fatalf("UpsertGameweekManagerStat (GW%d): %v", gw, err)
+		}
+	}
+
+	ids, err := testStore.GetStoredManagerStatEventIDs(ctx, 100)
+	if err != nil {
+		t.Fatalf("GetStoredManagerStatEventIDs: %v", err)
+	}
+	want := []int{3, 5, 8}
+	if len(ids) != len(want) {
+		t.Fatalf("len(ids) = %d, want %d", len(ids), len(want))
+	}
+	for i, w := range want {
+		if ids[i] != w {
+			t.Errorf("ids[%d] = %d, want %d", i, ids[i], w)
+		}
+	}
+}
+
+func TestGetStoredAwardEventIDs_Multiple(t *testing.T) {
+	truncateTables(t)
+	ctx := context.Background()
+
+	seedLeague(t, 100, "Test League", "h2h")
+	seedManager(t, 100, 1001, "Alice", "Alice FC")
+
+	for _, gw := range []int{7, 2, 9} {
+		if err := testStore.UpsertGameweekAward(ctx, store.GameweekAward{
+			LeagueID:    100,
+			EventID:     gw,
+			AwardKey:    "manager_of_the_week",
+			ManagerID:   1001,
+			MetricValue: 70,
+		}); err != nil {
+			t.Fatalf("UpsertGameweekAward (GW%d): %v", gw, err)
+		}
+	}
+
+	ids, err := testStore.GetStoredAwardEventIDs(ctx, 100)
+	if err != nil {
+		t.Fatalf("GetStoredAwardEventIDs: %v", err)
+	}
+	want := []int{2, 7, 9}
+	if len(ids) != len(want) {
+		t.Fatalf("len(ids) = %d, want %d", len(ids), len(want))
+	}
+	for i, w := range want {
+		if ids[i] != w {
+			t.Errorf("ids[%d] = %d, want %d", i, ids[i], w)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // UpsertSnapshotMeta / GetSnapshotMeta tests
 // ---------------------------------------------------------------------------
@@ -731,11 +964,14 @@ func TestSnapshotAtomicity(t *testing.T) {
 		{LeagueID: 100, EventID: 5, ManagerID: 9999, Rank: 2, Points: 24, TotalScore: 310}, // FK violation
 	}
 
-	meta := store.SnapshotMeta{
-		LeagueID: 100, EventID: 5,
-		Source: "live", StandingsFidelity: "historical",
+	snap := store.GameweekSnapshot{
+		Standings: standings,
+		Meta: store.SnapshotMeta{
+			LeagueID: 100, EventID: 5,
+			Source: "live", StandingsFidelity: "historical",
+		},
 	}
-	err := testStore.SaveGameweekSnapshot(ctx, standings, nil, nil, meta)
+	err := testStore.SaveGameweekSnapshot(ctx, snap)
 	if err == nil {
 		t.Fatal("SaveGameweekSnapshot should have failed with FK violation")
 	}

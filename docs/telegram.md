@@ -102,4 +102,4 @@ WEBHOOK_PORT=8080
 
 ## Data-Collection-Only Mode
 
-If both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are omitted, the bot runs in data-collection-only mode: it polls the FPL API and persists data to Postgres, but sends no notifications and starts no webhook server. This is useful for backfilling historical data or running the bot without Telegram.
+If both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are omitted, the bot runs in data-collection-only mode: it polls the FPL API and persists data to Postgres, but sends no notifications and starts no webhook server. This is useful for current-season backfill/enrichment or running the bot without Telegram.

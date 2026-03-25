@@ -33,7 +33,7 @@ lint:
 run:
 	go run cmd/bot/main.go
 
-## Backfill historical gameweeks (local, requires Postgres running)
+## Backfill and enrich finished current-season gameweeks (local, requires Postgres running)
 backfill:
 	go run cmd/backfill/main.go
 
@@ -45,12 +45,13 @@ docker-backfill:
 deploy:
 	docker compose up -d --build
 
-## Test the full stats → notify pipeline with real DB data (requires Postgres + Telegram)
+## Test the full stats → notify pipeline with real DB data (host-side tool)
 ## Usage: make notify-test              (latest gameweek)
 ##        make notify-test GW=12        (specific gameweek)
 ##        make notify-test DRY_RUN=1    (preview without sending)
+##        make notify-test DRY_RUN=1 VERIFY=1 VERIFY_LAST=8
 notify-test:
-	go run cmd/notify-test/main.go
+	go run ./cmd/notify-test
 
 ## Start the database
 db-up:

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/chrislonge/fpl-banter-bot/internal/config"
+	"github.com/chrislonge/fpl-banter-bot/internal/fpl"
 	"github.com/chrislonge/fpl-banter-bot/internal/stats"
 	"github.com/chrislonge/fpl-banter-bot/internal/store"
 	"github.com/chrislonge/fpl-banter-bot/pkg/notify/telegram"
@@ -31,6 +32,8 @@ import (
 
 func main() {
 	dryRun := flag.Bool("dry-run", os.Getenv("DRY_RUN") == "1", "build and log alerts without sending to Telegram")
+	verify := flag.Bool("verify", os.Getenv("VERIFY") == "1", "scan stored gameweeks and print a verification report instead of targeting a single gameweek")
+	verifyLast := flag.Int("verify-last", envInt("VERIFY_LAST", 0), "limit verification to the most recent N stored gameweeks (0 = all)")
 	flag.Parse()
 
 	cfg, err := config.Load()
@@ -67,7 +70,19 @@ func main() {
 	}
 
 	appStore := store.New(pool)
-	statsEngine := stats.New(appStore, int64(cfg.FPLLeagueID))
+	fplClient := fpl.NewClient("https://fantasy.premierleague.com/api", &http.Client{
+		Timeout: 30 * time.Second,
+	})
+	playerLookup := newPlayerLookup(fplClient)
+	statsEngine := stats.NewWithPlayerLookup(appStore, int64(cfg.FPLLeagueID), playerLookup)
+
+	if *verify {
+		if err := runVerification(ctx, appStore, statsEngine, int64(cfg.FPLLeagueID), *verifyLast); err != nil {
+			slog.Error("verification failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	eventID, err := resolveEventID(ctx, appStore, int64(cfg.FPLLeagueID))
 	if err != nil {
@@ -93,7 +108,10 @@ func main() {
 	}
 
 	if *dryRun {
-		slog.Info("dry run — skipping Telegram delivery", "event_id", eventID, "alert_count", len(alerts))
+		slog.Info("dry run — skipping Telegram delivery and previewing the awards-first Telegram recap",
+			"event_id", eventID,
+			"alert_count", len(alerts),
+		)
 
 		// Preview the formatted messages so you can see the exact output.
 		messages, err := telegram.FormatAlerts(alerts)
@@ -156,4 +174,16 @@ func setupLogger(level string) {
 	}
 	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})
 	slog.SetDefault(slog.New(handler))
+}
+
+func envInt(name string, fallback int) int {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return n
 }

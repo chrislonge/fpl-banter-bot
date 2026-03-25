@@ -46,14 +46,17 @@ type Store interface {
 	UpsertGameweekStanding(ctx context.Context, standing GameweekStanding) error
 	UpsertChipUsage(ctx context.Context, chip ChipUsage) error
 	UpsertH2HResult(ctx context.Context, result H2HResult) error
+	UpsertGameweekManagerStat(ctx context.Context, stat GameweekManagerStat) error
+	UpsertGameweekAward(ctx context.Context, award GameweekAward) error
+	SaveGameweekAwards(ctx context.Context, leagueID int64, eventID int, awards []GameweekAward) error
 
-	// SaveGameweekSnapshot writes all standings, chip usages, and H2H
-	// results for a gameweek in a single database transaction. If any
-	// write fails, the entire batch is rolled back — no partial data.
+	// SaveGameweekSnapshot writes the stored facts for a gameweek in a
+	// single database transaction. If any write fails, the entire batch
+	// is rolled back — no partial data.
 	//
 	// Prerequisites: the league and all referenced managers must already
 	// exist (upserted via UpsertLeague/UpsertManager before calling this).
-	SaveGameweekSnapshot(ctx context.Context, standings []GameweekStanding, chips []ChipUsage, results []H2HResult, meta SnapshotMeta) error
+	SaveGameweekSnapshot(ctx context.Context, snap GameweekSnapshot) error
 
 	// --- Reads (the stats engine calls these to diff gameweeks) ---
 
@@ -61,10 +64,14 @@ type Store interface {
 	GetChipUsage(ctx context.Context, leagueID int64, eventID int) ([]ChipUsage, error)
 	GetH2HResults(ctx context.Context, leagueID int64, eventID int) ([]H2HResult, error)
 	GetH2HResultsRange(ctx context.Context, leagueID int64, fromEvent int, toEvent int) ([]H2HResult, error)
+	GetGameweekManagerStats(ctx context.Context, leagueID int64, eventID int) ([]GameweekManagerStat, error)
+	GetGameweekAwards(ctx context.Context, leagueID int64, eventID int) ([]GameweekAward, error)
 	GetManagers(ctx context.Context, leagueID int64) ([]Manager, error)
 	GetLeague(ctx context.Context, leagueID int64) (League, error)
 	GetLatestEventID(ctx context.Context, leagueID int64) (int, error)
 	GetStoredEventIDs(ctx context.Context, leagueID int64) ([]int, error)
+	GetStoredManagerStatEventIDs(ctx context.Context, leagueID int64) ([]int, error)
+	GetStoredAwardEventIDs(ctx context.Context, leagueID int64) ([]int, error)
 	UpsertSnapshotMeta(ctx context.Context, meta SnapshotMeta) error
 	GetSnapshotMeta(ctx context.Context, leagueID int64, eventID int) (SnapshotMeta, error)
 }
@@ -135,6 +142,52 @@ func (s *PostgresStore) UpsertH2HResult(ctx context.Context, result H2HResult) e
 	return err
 }
 
+func (s *PostgresStore) UpsertGameweekManagerStat(ctx context.Context, stat GameweekManagerStat) error {
+	_, err := s.pool.Exec(ctx, upsertGameweekManagerStat,
+		stat.LeagueID, stat.EventID, stat.ManagerID, stat.PointsOnBench,
+		stat.CaptainElementID, stat.CaptainPoints, stat.CaptainMultiplier,
+	)
+	return err
+}
+
+func (s *PostgresStore) UpsertGameweekAward(ctx context.Context, award GameweekAward) error {
+	_, err := s.pool.Exec(ctx, upsertGameweekAward,
+		award.LeagueID, award.EventID, award.AwardKey, award.ManagerID,
+		award.OpponentManagerID, award.PlayerElementID, award.MetricValue,
+	)
+	return err
+}
+
+func (s *PostgresStore) SaveGameweekAwards(ctx context.Context, leagueID int64, eventID int, awards []GameweekAward) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() {
+		if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
+			// Best-effort cleanup only.
+		}
+	}()
+
+	if _, err := tx.Exec(ctx, deleteGameweekAwardsForEvent, leagueID, eventID); err != nil {
+		return fmt.Errorf("delete existing awards: %w", err)
+	}
+
+	for _, award := range awards {
+		if award.LeagueID != leagueID || award.EventID != eventID {
+			return fmt.Errorf("award %q belongs to %d/%d, want %d/%d", award.AwardKey, award.LeagueID, award.EventID, leagueID, eventID)
+		}
+		if _, err := tx.Exec(ctx, upsertGameweekAward,
+			leagueID, eventID, award.AwardKey, award.ManagerID,
+			award.OpponentManagerID, award.PlayerElementID, award.MetricValue,
+		); err != nil {
+			return fmt.Errorf("upsert award %q: %w", award.AwardKey, err)
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
 // SaveGameweekSnapshot writes an entire gameweek's data atomically using
 // a database transaction.
 //
@@ -151,7 +204,7 @@ func (s *PostgresStore) UpsertH2HResult(ctx context.Context, result H2HResult) e
 // deferred Rollback is a no-op (rolling back an already-committed
 // transaction does nothing). This pattern guarantees cleanup regardless
 // of which code path executes.
-func (s *PostgresStore) SaveGameweekSnapshot(ctx context.Context, standings []GameweekStanding, chips []ChipUsage, results []H2HResult, meta SnapshotMeta) error {
+func (s *PostgresStore) SaveGameweekSnapshot(ctx context.Context, snap GameweekSnapshot) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -163,7 +216,7 @@ func (s *PostgresStore) SaveGameweekSnapshot(ctx context.Context, standings []Ga
 		}
 	}()
 
-	for _, st := range standings {
+	for _, st := range snap.Standings {
 		if _, err := tx.Exec(ctx, upsertGameweekStanding,
 			st.LeagueID, st.EventID, st.ManagerID,
 			st.Rank, st.Points, st.TotalScore,
@@ -172,13 +225,13 @@ func (s *PostgresStore) SaveGameweekSnapshot(ctx context.Context, standings []Ga
 		}
 	}
 
-	for _, ch := range chips {
+	for _, ch := range snap.Chips {
 		if _, err := tx.Exec(ctx, upsertChipUsage, ch.LeagueID, ch.ManagerID, ch.EventID, ch.Chip); err != nil {
 			return fmt.Errorf("upsert chip for manager %d: %w", ch.ManagerID, err)
 		}
 	}
 
-	for _, r := range results {
+	for _, r := range snap.Results {
 		if _, err := tx.Exec(ctx, upsertH2HResult,
 			r.LeagueID, r.EventID,
 			r.Manager1ID, r.Manager1Score,
@@ -188,8 +241,17 @@ func (s *PostgresStore) SaveGameweekSnapshot(ctx context.Context, standings []Ga
 		}
 	}
 
+	for _, stat := range snap.ManagerStats {
+		if _, err := tx.Exec(ctx, upsertGameweekManagerStat,
+			stat.LeagueID, stat.EventID, stat.ManagerID, stat.PointsOnBench,
+			stat.CaptainElementID, stat.CaptainPoints, stat.CaptainMultiplier,
+		); err != nil {
+			return fmt.Errorf("upsert manager stat for manager %d: %w", stat.ManagerID, err)
+		}
+	}
+
 	if _, err := tx.Exec(ctx, upsertSnapshotMeta,
-		meta.LeagueID, meta.EventID, meta.Source, meta.StandingsFidelity,
+		snap.Meta.LeagueID, snap.Meta.EventID, snap.Meta.Source, snap.Meta.StandingsFidelity,
 	); err != nil {
 		return fmt.Errorf("upsert snapshot meta: %w", err)
 	}
@@ -311,6 +373,48 @@ func (s *PostgresStore) GetH2HResultsRange(ctx context.Context, leagueID int64, 
 	return results, rows.Err()
 }
 
+func (s *PostgresStore) GetGameweekManagerStats(ctx context.Context, leagueID int64, eventID int) ([]GameweekManagerStat, error) {
+	rows, err := s.pool.Query(ctx, getGameweekManagerStats, leagueID, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stats []GameweekManagerStat
+	for rows.Next() {
+		var stat GameweekManagerStat
+		if err := rows.Scan(
+			&stat.LeagueID, &stat.EventID, &stat.ManagerID, &stat.PointsOnBench,
+			&stat.CaptainElementID, &stat.CaptainPoints, &stat.CaptainMultiplier, &stat.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		stats = append(stats, stat)
+	}
+	return stats, rows.Err()
+}
+
+func (s *PostgresStore) GetGameweekAwards(ctx context.Context, leagueID int64, eventID int) ([]GameweekAward, error) {
+	rows, err := s.pool.Query(ctx, getGameweekAwards, leagueID, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var awards []GameweekAward
+	for rows.Next() {
+		var award GameweekAward
+		if err := rows.Scan(
+			&award.LeagueID, &award.EventID, &award.AwardKey, &award.ManagerID,
+			&award.OpponentManagerID, &award.PlayerElementID, &award.MetricValue, &award.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		awards = append(awards, award)
+	}
+	return awards, rows.Err()
+}
+
 // GetLatestEventID returns the highest gameweek number stored for a league.
 // Returns 0 if no data exists yet (the SQL uses COALESCE(MAX(...), 0)).
 func (s *PostgresStore) GetLatestEventID(ctx context.Context, leagueID int64) (int, error) {
@@ -326,6 +430,42 @@ func (s *PostgresStore) GetLatestEventID(ctx context.Context, leagueID int64) (i
 // which would miss gaps in the middle.
 func (s *PostgresStore) GetStoredEventIDs(ctx context.Context, leagueID int64) ([]int, error) {
 	rows, err := s.pool.Query(ctx, getStoredEventIDs, leagueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (s *PostgresStore) GetStoredManagerStatEventIDs(ctx context.Context, leagueID int64) ([]int, error) {
+	rows, err := s.pool.Query(ctx, getStoredManagerStatEventIDs, leagueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (s *PostgresStore) GetStoredAwardEventIDs(ctx context.Context, leagueID int64) ([]int, error) {
+	rows, err := s.pool.Query(ctx, getStoredAwardEventIDs, leagueID)
 	if err != nil {
 		return nil, err
 	}
