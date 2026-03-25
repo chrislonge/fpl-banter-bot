@@ -58,7 +58,6 @@ func FormatAlerts(alerts []notify.Alert) ([]string, error) {
 		rankChanges []notify.Alert
 		streaks     []notify.Alert
 		chips       []notify.Alert
-		summaries   []notify.Alert
 	)
 	for _, a := range alerts {
 		switch a.Kind {
@@ -72,8 +71,6 @@ func FormatAlerts(alerts []notify.Alert) ([]string, error) {
 			streaks = append(streaks, a)
 		case notify.AlertKindChipUsage:
 			chips = append(chips, a)
-		case notify.AlertKindGameweekSummary:
-			summaries = append(summaries, a)
 		}
 	}
 
@@ -96,11 +93,6 @@ func FormatAlerts(alerts []notify.Alert) ([]string, error) {
 	}
 	if lines := formatChips(chips); lines != "" {
 		sections = append(sections, lines)
-	}
-	if len(awards) == 0 {
-		if lines := formatSummaries(summaries); lines != "" {
-			sections = append(sections, lines)
-		}
 	}
 
 	if len(sections) == 0 {
@@ -190,36 +182,6 @@ func formatPlayer(player notify.PlayerRef) string {
 		return fmt.Sprintf("player #%d", player.ElementID)
 	}
 	return "their captain"
-}
-
-func formatSummaries(alerts []notify.Alert) string {
-	if len(alerts) == 0 {
-		return ""
-	}
-
-	// There should only be one summary per gameweek, but handle gracefully.
-	a := alerts[0]
-	s := a.GameweekSummary
-	if s == nil {
-		return ""
-	}
-
-	var b strings.Builder
-	b.WriteString("<b>Summary</b>")
-	b.WriteString(fmt.Sprintf("\nHighest scorer: <b>%s</b> (%d pts)",
-		esc(s.HighScorer.Manager.Name), s.HighScorer.Score))
-	b.WriteString(fmt.Sprintf("\nWooden spoon \xf0\x9f\xa5\x84 goes to %s (%d pts)",
-		esc(s.LowScorer.Manager.Name), s.LowScorer.Score))
-
-	if s.BiggestUpset != nil {
-		u := s.BiggestUpset
-		b.WriteString(fmt.Sprintf("\nBiggest upset: %s-place %s got absolutely mugged by %s-place %s (%d-%d)",
-			ordinal(u.LoserPreviousRank), esc(u.Loser.Name),
-			ordinal(u.WinnerPreviousRank), esc(u.Winner.Name),
-			u.WinnerScore, u.LoserScore))
-	}
-
-	return b.String()
 }
 
 // chunkMessages combines a header and sections into messages that each fit

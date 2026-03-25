@@ -209,18 +209,9 @@ func (e *Engine) buildGameweekAlerts(ctx context.Context, eventID int, persistAw
 		})
 	}
 
-	var biggestUpset *notify.UpsetAlert
-	if summary, ok := buildGameweekSummary(managerByID, currentResults, prevRanks, prevHistorical); ok {
-		biggestUpset = summary.BiggestUpset
-		alerts = append(alerts, notify.Alert{
-			Kind:            notify.AlertKindGameweekSummary,
-			LeagueID:        e.leagueID,
-			EventID:         eventID,
-			GameweekSummary: summary,
-		})
-	}
+	plotTwist := buildPlotTwist(managerByID, currentResults, prevRanks, prevHistorical)
 
-	awardsAlert, awardRows := buildGameweekAwards(e.leagueID, eventID, managerByID, playerByID, currentResults, currentManagerStats, biggestUpset)
+	awardsAlert, awardRows := buildGameweekAwards(e.leagueID, eventID, managerByID, playerByID, currentResults, currentManagerStats, plotTwist)
 	if persistAwards && len(awardRows) > 0 {
 		if err := e.store.SaveGameweekAwards(ctx, e.leagueID, eventID, awardRows); err != nil {
 			return nil, fmt.Errorf("save awards for event %d: %w", eventID, err)
@@ -473,48 +464,12 @@ func buildCurrentStreaks(managerByID map[int64]notify.ManagerRef, results []stor
 	return streaks
 }
 
-func buildGameweekSummary(managerByID map[int64]notify.ManagerRef, results []store.H2HResult, prevRanks map[int64]int, prevHistorical bool) (*notify.GameweekSummaryAlert, bool) {
-	type participantScore struct {
-		ManagerID int64
-		Score     int
-	}
-
+func buildPlotTwist(managerByID map[int64]notify.ManagerRef, results []store.H2HResult, prevRanks map[int64]int, prevHistorical bool) *notify.UpsetAlert {
 	if len(results) == 0 {
-		return nil, false
+		return nil
 	}
-
-	participants := make([]participantScore, 0, len(results)*2)
-	for _, result := range results {
-		participants = append(participants,
-			participantScore{ManagerID: result.Manager1ID, Score: result.Manager1Score},
-			participantScore{ManagerID: result.Manager2ID, Score: result.Manager2Score},
-		)
-	}
-
-	high := participants[0]
-	low := participants[0]
-	for _, participant := range participants[1:] {
-		if participant.Score > high.Score || (participant.Score == high.Score && participant.ManagerID < high.ManagerID) {
-			high = participant
-		}
-		if participant.Score < low.Score || (participant.Score == low.Score && participant.ManagerID < low.ManagerID) {
-			low = participant
-		}
-	}
-
-	summary := &notify.GameweekSummaryAlert{
-		HighScorer: notify.ManagerScore{
-			Manager: managerRef(managerByID, high.ManagerID),
-			Score:   high.Score,
-		},
-		LowScorer: notify.ManagerScore{
-			Manager: managerRef(managerByID, low.ManagerID),
-			Score:   low.Score,
-		},
-	}
-
 	if !prevHistorical {
-		return summary, true
+		return nil
 	}
 
 	var bestUpset *notify.UpsetAlert
@@ -563,8 +518,7 @@ func buildGameweekSummary(managerByID map[int64]notify.ManagerRef, results []sto
 		}
 	}
 
-	summary.BiggestUpset = bestUpset
-	return summary, true
+	return bestUpset
 }
 
 func ranksByManager(standings []store.GameweekStanding) map[int64]int {

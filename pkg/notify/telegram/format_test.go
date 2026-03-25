@@ -74,19 +74,6 @@ func chipAlert(eventID int, leagueID int64, manager notify.ManagerRef, chip stri
 	}
 }
 
-func summaryAlert(eventID int, leagueID int64, high notify.ManagerScore, low notify.ManagerScore, upset *notify.UpsetAlert) notify.Alert {
-	return notify.Alert{
-		Kind:     notify.AlertKindGameweekSummary,
-		LeagueID: leagueID,
-		EventID:  eventID,
-		GameweekSummary: &notify.GameweekSummaryAlert{
-			HighScorer:   high,
-			LowScorer:    low,
-			BiggestUpset: upset,
-		},
-	}
-}
-
 func awardsAlert(eventID int, leagueID int64, awards *notify.GameweekAwardsAlert) notify.Alert {
 	return notify.Alert{
 		Kind:           notify.AlertKindGameweekAwards,
@@ -159,17 +146,16 @@ func TestFormatAlerts_MixedAlertKinds_DisplayOrder(t *testing.T) {
 	dave := managerRef(2, "Dave")
 	sarah := managerRef(3, "Sarah")
 
-	// Deliberately emit in non-display order: chip, rank, h2h, streak, summary.
+	// Deliberately emit in non-display order: chip, rank, h2h, streak, awards.
 	alerts := []notify.Alert{
 		chipAlert(10, 100, sarah, "wildcard"),
 		rankAlert(10, 100, chris, 4, 1, true),
 		h2hAlert(10, 100, chris, 65, dave, 42, int64Ptr(1)),
 		streakAlert(10, 100, chris, notify.StreakKindWin, 4, 7, 10),
-		summaryAlert(10, 100,
-			notify.ManagerScore{Manager: chris, Score: 65},
-			notify.ManagerScore{Manager: dave, Score: 42},
-			nil,
-		),
+		awardsAlert(10, 100, &notify.GameweekAwardsAlert{
+			ManagerOfTheWeek: &notify.ManagerScore{Manager: chris, Score: 65},
+			WoodenSpoon:      &notify.ManagerScore{Manager: dave, Score: 42},
+		}),
 	}
 
 	msgs, err := FormatAlerts(alerts)
@@ -182,16 +168,19 @@ func TestFormatAlerts_MixedAlertKinds_DisplayOrder(t *testing.T) {
 
 	combined := strings.Join(msgs, "\n\n")
 
-	// Verify display order: Results before Table Movers before Streaks
-	// before Chips before Summary.
+	// Verify display order: Awards before Results before Table Movers
+	// before Streaks before Chips.
+	awardsIdx := strings.Index(combined, "<b>Awards Ceremony</b>")
 	resultsIdx := strings.Index(combined, "<b>Results</b>")
 	moversIdx := strings.Index(combined, "<b>Table Movers</b>")
 	streaksIdx := strings.Index(combined, "<b>Streaks</b>")
 	chipsIdx := strings.Index(combined, "<b>Chips Played</b>")
-	summaryIdx := strings.Index(combined, "<b>Summary</b>")
 
-	if resultsIdx == -1 || moversIdx == -1 || streaksIdx == -1 || chipsIdx == -1 || summaryIdx == -1 {
+	if awardsIdx == -1 || resultsIdx == -1 || moversIdx == -1 || streaksIdx == -1 || chipsIdx == -1 {
 		t.Fatalf("missing section(s) in output:\n%s", combined)
+	}
+	if awardsIdx >= resultsIdx {
+		t.Error("Awards Ceremony should appear before Results")
 	}
 	if resultsIdx >= moversIdx {
 		t.Error("Results should appear before Table Movers")
@@ -201,9 +190,6 @@ func TestFormatAlerts_MixedAlertKinds_DisplayOrder(t *testing.T) {
 	}
 	if streaksIdx >= chipsIdx {
 		t.Error("Streaks should appear before Chips Played")
-	}
-	if chipsIdx >= summaryIdx {
-		t.Error("Chips Played should appear before Summary")
 	}
 }
 
@@ -260,7 +246,7 @@ func TestFormatAlerts_SingleKindOnly(t *testing.T) {
 		t.Error("expected Results section")
 	}
 	// Should NOT contain other section headers.
-	for _, section := range []string{"Table Movers", "Streaks", "Chips Played", "Summary"} {
+	for _, section := range []string{"Awards Ceremony", "Table Movers", "Streaks", "Chips Played"} {
 		if strings.Contains(msgs[0], section) {
 			t.Errorf("unexpected section %q in single-kind output", section)
 		}
@@ -272,14 +258,10 @@ func TestFormatAlerts_AllKindsPresent(t *testing.T) {
 	dave := managerRef(2, "Dave")
 
 	alerts := []notify.Alert{
-		h2hAlert(10, 100, chris, 65, dave, 42, int64Ptr(1)),
-		rankAlert(10, 100, chris, 3, 1, true),
-		streakAlert(10, 100, chris, notify.StreakKindWin, 5, 6, 10),
-		chipAlert(10, 100, dave, "bboost"),
-		summaryAlert(10, 100,
-			notify.ManagerScore{Manager: chris, Score: 65},
-			notify.ManagerScore{Manager: dave, Score: 42},
-			&notify.UpsetAlert{
+		awardsAlert(10, 100, &notify.GameweekAwardsAlert{
+			ManagerOfTheWeek: &notify.ManagerScore{Manager: chris, Score: 65},
+			WoodenSpoon:      &notify.ManagerScore{Manager: dave, Score: 42},
+			PlotTwist: &notify.UpsetAlert{
 				Winner:             chris,
 				WinnerScore:        65,
 				WinnerPreviousRank: 3,
@@ -288,7 +270,11 @@ func TestFormatAlerts_AllKindsPresent(t *testing.T) {
 				LoserPreviousRank:  1,
 				RankGap:            2,
 			},
-		),
+		}),
+		h2hAlert(10, 100, chris, 65, dave, 42, int64Ptr(1)),
+		rankAlert(10, 100, chris, 3, 1, true),
+		streakAlert(10, 100, chris, notify.StreakKindWin, 5, 6, 10),
+		chipAlert(10, 100, dave, "bboost"),
 	}
 
 	msgs, err := FormatAlerts(alerts)
@@ -299,7 +285,7 @@ func TestFormatAlerts_AllKindsPresent(t *testing.T) {
 	combined := strings.Join(msgs, "\n\n")
 
 	// All sections present.
-	for _, section := range []string{"Results", "Table Movers", "Streaks", "Chips Played", "Summary"} {
+	for _, section := range []string{"Awards Ceremony", "Results", "Table Movers", "Streaks", "Chips Played"} {
 		if !strings.Contains(combined, section) {
 			t.Errorf("missing section: %s", section)
 		}
@@ -315,24 +301,19 @@ func TestFormatAlerts_AllKindsPresent(t *testing.T) {
 	if !strings.Contains(combined, "Bench Boost") {
 		t.Error("expected human-readable chip name for bboost")
 	}
-	if !strings.Contains(combined, "Wooden spoon") {
-		t.Error("expected wooden spoon banter for low scorer")
+	if !strings.Contains(combined, "took the spoon") {
+		t.Error("expected awards copy for wooden spoon")
 	}
-	if !strings.Contains(combined, "absolutely mugged") {
-		t.Error("expected upset banter")
+	if !strings.Contains(combined, "Plot twist:") {
+		t.Error("expected plot twist line in awards")
 	}
 }
 
-func TestFormatAlerts_AwardsFirstSuppressesLegacySummary(t *testing.T) {
+func TestFormatAlerts_AwardsIncludePlotTwist(t *testing.T) {
 	chris := managerRef(1, "Chris")
 	dave := managerRef(2, "Dave")
 
 	alerts := []notify.Alert{
-		summaryAlert(10, 100,
-			notify.ManagerScore{Manager: chris, Score: 65},
-			notify.ManagerScore{Manager: dave, Score: 42},
-			nil,
-		),
 		h2hAlert(10, 100, chris, 65, dave, 42, int64Ptr(1)),
 		awardsAlert(10, 100, &notify.GameweekAwardsAlert{
 			ManagerOfTheWeek: &notify.ManagerScore{Manager: chris, Score: 65},
@@ -376,6 +357,15 @@ func TestFormatAlerts_AwardsFirstSuppressesLegacySummary(t *testing.T) {
 				OpponentScore: 65,
 				Margin:        5,
 			},
+			PlotTwist: &notify.UpsetAlert{
+				Winner:             chris,
+				WinnerScore:        65,
+				WinnerPreviousRank: 5,
+				Loser:              dave,
+				LoserScore:         42,
+				LoserPreviousRank:  2,
+				RankGap:            3,
+			},
 		}),
 	}
 
@@ -393,9 +383,6 @@ func TestFormatAlerts_AwardsFirstSuppressesLegacySummary(t *testing.T) {
 	if awardsIdx >= resultsIdx {
 		t.Fatal("Awards Ceremony should appear before Results")
 	}
-	if strings.Contains(combined, "<b>Summary</b>") {
-		t.Fatal("legacy Summary section should be suppressed when awards are present")
-	}
 
 	for _, want := range []string{
 		"💩 Wooden Spoon: <b>Dave</b> took the spoon with 42 pts",
@@ -405,6 +392,7 @@ func TestFormatAlerts_AwardsFirstSuppressesLegacySummary(t *testing.T) {
 		"💀 Biggest Thrashing: <b>Chris</b> steamrolled Dave 65-42",
 		"🎰 Luckiest Win: <b>Chris</b> snuck past Dave 38-33",
 		"😤 Unluckiest Loss: <b>Dave</b> lost 60-65 to Chris and still beats everyone else this week",
+		"Plot twist: 5th-place Chris mugged 2nd-place Dave (65-42)",
 	} {
 		if !strings.Contains(combined, want) {
 			t.Errorf("expected %q in output:\n%s", want, combined)
@@ -491,32 +479,6 @@ func TestFormatAlerts_RankChange_Dropped(t *testing.T) {
 	combined := strings.Join(msgs, "\n\n")
 	if !strings.Contains(combined, "dropped from 2nd to 5th") {
 		t.Error("expected drop description")
-	}
-}
-
-func TestFormatAlerts_SummaryWithoutUpset(t *testing.T) {
-	chris := managerRef(1, "Chris")
-	dave := managerRef(2, "Dave")
-
-	alerts := []notify.Alert{
-		summaryAlert(10, 100,
-			notify.ManagerScore{Manager: chris, Score: 65},
-			notify.ManagerScore{Manager: dave, Score: 42},
-			nil,
-		),
-	}
-
-	msgs, err := FormatAlerts(alerts)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	combined := strings.Join(msgs, "\n\n")
-	if !strings.Contains(combined, "Highest scorer") {
-		t.Error("expected high scorer in summary")
-	}
-	if strings.Contains(combined, "Biggest upset") {
-		t.Error("should not contain upset section when upset is nil")
 	}
 }
 

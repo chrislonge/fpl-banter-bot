@@ -41,6 +41,44 @@ func TestIntegration_SendAlerts(t *testing.T) {
 	// These reuse the fixture builders from format_test.go — accessible
 	// here because we're in the same package (white-box test).
 	alerts := []notify.Alert{
+		awardsAlert(testEventID, testLeagueID, &notify.GameweekAwardsAlert{
+			ManagerOfTheWeek: &notify.ManagerScore{Manager: managerRef(1, "Alice"), Score: 72},
+			WoodenSpoon:      &notify.ManagerScore{Manager: managerRef(4, "Dave"), Score: 38},
+			CaptainGenius: &notify.CaptainAwardAlert{
+				Manager:           managerRef(1, "Alice"),
+				Captain:           notify.PlayerRef{ElementID: 10, Name: "Salah"},
+				CaptainPoints:     12,
+				CaptainMultiplier: 2,
+				TotalPoints:       24,
+			},
+			BenchWarmer: &notify.BenchWarmerAwardAlert{
+				Manager:       managerRef(3, "Charlie"),
+				PointsOnBench: 15,
+			},
+			BiggestThrashing: &notify.MatchupAwardAlert{
+				Winner:      managerRef(1, "Alice"),
+				WinnerScore: 72,
+				Loser:       managerRef(2, "Bob"),
+				LoserScore:  45,
+				Margin:      27,
+			},
+			LuckiestWin: &notify.MatchupAwardAlert{
+				Winner:      managerRef(4, "Dave"),
+				WinnerScore: 40,
+				Loser:       managerRef(5, "Eve"),
+				LoserScore:  39,
+				Margin:      1,
+			},
+			PlotTwist: &notify.UpsetAlert{
+				Winner:             managerRef(4, "Dave"),
+				WinnerScore:        55,
+				WinnerPreviousRank: 5,
+				Loser:              managerRef(2, "Bob"),
+				LoserScore:         45,
+				LoserPreviousRank:  2,
+				RankGap:            3,
+			},
+		}),
 		h2hAlert(testEventID, testLeagueID,
 			managerRef(1, "Alice"), 72,
 			managerRef(2, "Bob"), 45,
@@ -56,19 +94,6 @@ func TestIntegration_SendAlerts(t *testing.T) {
 		streakAlert(testEventID, testLeagueID, managerRef(1, "Alice"), notify.StreakKindWin, 5, 95, 99),
 		streakAlert(testEventID, testLeagueID, managerRef(4, "Dave"), notify.StreakKindLoss, 3, 97, 99),
 		chipAlert(testEventID, testLeagueID, managerRef(3, "Charlie"), "wildcard"),
-		summaryAlert(testEventID, testLeagueID,
-			notify.ManagerScore{Manager: managerRef(1, "Alice"), Score: 72},
-			notify.ManagerScore{Manager: managerRef(4, "Dave"), Score: 38},
-			&notify.UpsetAlert{
-				Winner:             managerRef(4, "Dave"),
-				WinnerScore:        55,
-				WinnerPreviousRank: 5,
-				Loser:              managerRef(2, "Bob"),
-				LoserScore:         45,
-				LoserPreviousRank:  2,
-				RankGap:            3,
-			},
-		),
 	}
 
 	client := New(

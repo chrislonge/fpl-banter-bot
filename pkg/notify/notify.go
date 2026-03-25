@@ -12,12 +12,11 @@ import "context"
 type AlertKind string
 
 const (
-	AlertKindGameweekAwards  AlertKind = "gameweek_awards"
-	AlertKindRankChange      AlertKind = "rank_change"
-	AlertKindStreak          AlertKind = "streak"
-	AlertKindChipUsage       AlertKind = "chip_usage"
-	AlertKindGameweekSummary AlertKind = "gameweek_summary"
-	AlertKindH2HResult       AlertKind = "h2h_result"
+	AlertKindGameweekAwards AlertKind = "gameweek_awards"
+	AlertKindRankChange     AlertKind = "rank_change"
+	AlertKindStreak         AlertKind = "streak"
+	AlertKindChipUsage      AlertKind = "chip_usage"
+	AlertKindH2HResult      AlertKind = "h2h_result"
 )
 
 // StreakKind identifies the type of streak.
@@ -58,12 +57,11 @@ type Alert struct {
 	LeagueID int64
 	EventID  int
 
-	RankChange      *RankChangeAlert
-	Streak          *StreakAlert
-	ChipUsage       *ChipUsageAlert
-	GameweekAwards  *GameweekAwardsAlert
-	GameweekSummary *GameweekSummaryAlert
-	H2HResult       *H2HResultAlert
+	RankChange     *RankChangeAlert
+	Streak         *StreakAlert
+	ChipUsage      *ChipUsageAlert
+	GameweekAwards *GameweekAwardsAlert
+	H2HResult      *H2HResultAlert
 }
 
 // RankChangeAlert reports a movement in the league table relative to the
@@ -155,15 +153,6 @@ type GameweekAwardsAlert struct {
 	LuckiestWin      *MatchupAwardAlert
 	UnluckiestLoss   *UnluckiestLossAlert
 	PlotTwist        *UpsetAlert
-}
-
-// GameweekSummaryAlert reports the top-level summary for a gameweek.
-// Deprecated: keep emitting this in v2 for compatibility while notifiers
-// migrate to the richer GameweekAwardsAlert payload.
-type GameweekSummaryAlert struct {
-	HighScorer   ManagerScore
-	LowScorer    ManagerScore
-	BiggestUpset *UpsetAlert
 }
 
 // H2HResultAlert reports the outcome of a single head-to-head fixture.

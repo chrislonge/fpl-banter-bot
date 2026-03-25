@@ -123,8 +123,8 @@ func TestBuildGameweekAlertsHistoricalRankChangesAndSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildGameweekAlerts: %v", err)
 	}
-	if len(alerts) != 9 {
-		t.Fatalf("len(alerts) = %d, want 9", len(alerts))
+	if len(alerts) != 8 {
+		t.Fatalf("len(alerts) = %d, want 8", len(alerts))
 	}
 
 	rankChanges := alertsByKind(alerts, notify.AlertKindRankChange)
@@ -144,24 +144,6 @@ func TestBuildGameweekAlertsHistoricalRankChangesAndSummary(t *testing.T) {
 		t.Errorf("chip alert = %+v, want Charlie wildcard", chipAlerts[0].ChipUsage)
 	}
 
-	summaryAlerts := alertsByKind(alerts, notify.AlertKindGameweekSummary)
-	if len(summaryAlerts) != 1 {
-		t.Fatalf("len(summaryAlerts) = %d, want 1", len(summaryAlerts))
-	}
-	summary := summaryAlerts[0].GameweekSummary
-	if summary.HighScorer.Manager.ID != 101 || summary.HighScorer.Score != 70 {
-		t.Errorf("high scorer = %+v, want Alice 70", summary.HighScorer)
-	}
-	if summary.LowScorer.Manager.ID != 303 || summary.LowScorer.Score != 40 {
-		t.Errorf("low scorer = %+v, want Charlie 40", summary.LowScorer)
-	}
-	if summary.BiggestUpset == nil {
-		t.Fatal("summary.BiggestUpset = nil, want Dave over Charlie")
-	}
-	if summary.BiggestUpset.Winner.ID != 404 || summary.BiggestUpset.Loser.ID != 303 {
-		t.Errorf("biggest upset = %+v, want Dave over Charlie", summary.BiggestUpset)
-	}
-
 	awardAlerts := alertsByKind(alerts, notify.AlertKindGameweekAwards)
 	if len(awardAlerts) != 1 {
 		t.Fatalf("len(awardAlerts) = %d, want 1", len(awardAlerts))
@@ -174,6 +156,9 @@ func TestBuildGameweekAlertsHistoricalRankChangesAndSummary(t *testing.T) {
 	}
 	if awardAlerts[0].GameweekAwards.ArmbandOfShame == nil || awardAlerts[0].GameweekAwards.ArmbandOfShame.Manager.ID != 202 {
 		t.Errorf("armband of shame = %+v, want Bob", awardAlerts[0].GameweekAwards.ArmbandOfShame)
+	}
+	if awardAlerts[0].GameweekAwards.PlotTwist == nil || awardAlerts[0].GameweekAwards.PlotTwist.Winner.ID != 404 || awardAlerts[0].GameweekAwards.PlotTwist.Loser.ID != 303 {
+		t.Errorf("plot twist = %+v, want Dave over Charlie", awardAlerts[0].GameweekAwards.PlotTwist)
 	}
 	if got := len(engine.store.(*fakeStore).savedAwardsByEvent[2]); got != 8 {
 		t.Errorf("saved awards count = %d, want 8", got)
@@ -265,9 +250,6 @@ func TestBuildGameweekAlertsSyntheticStandingsStillAllowStreaksAndChips(t *testi
 		t.Errorf("chip alerts = %+v, want Bob chip alert", chipAlerts)
 	}
 
-	if got := len(alertsByKind(alerts, notify.AlertKindGameweekSummary)); got != 1 {
-		t.Fatalf("len(summaryAlerts) = %d, want 1", got)
-	}
 	if got := len(alertsByKind(alerts, notify.AlertKindGameweekAwards)); got != 1 {
 		t.Fatalf("len(awardAlerts) = %d, want 1", got)
 	}
