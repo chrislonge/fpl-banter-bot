@@ -510,13 +510,13 @@ func TestSaveGameweekSnapshot(t *testing.T) {
 	}
 
 	snap := store.GameweekSnapshot{
-		Standings: standings,
-		Chips:     chips,
-		Results:   results,
+		Standings:    standings,
+		Chips:        chips,
+		Results:      results,
 		ManagerStats: managerStats,
 		Meta: store.SnapshotMeta{
-		LeagueID: 100, EventID: 5,
-		Source: "live", StandingsFidelity: "historical",
+			LeagueID: 100, EventID: 5,
+			Source: "live", StandingsFidelity: "historical",
 		},
 	}
 	if err := testStore.SaveGameweekSnapshot(ctx, snap); err != nil {
