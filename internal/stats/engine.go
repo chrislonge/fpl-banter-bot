@@ -91,6 +91,17 @@ func NewWithPlayerLookup(store Store, leagueID int64, playerLookup PlayerLookup)
 
 // BuildGameweekAlerts computes all proactive alerts for a single gameweek.
 func (e *Engine) BuildGameweekAlerts(ctx context.Context, eventID int) ([]notify.Alert, error) {
+	return e.buildGameweekAlerts(ctx, eventID, true)
+}
+
+// BuildGameweekAlertsReadOnly computes proactive alerts without persisting
+// any derived award rows. This is used by diagnostic tooling such as
+// notify-test verification passes.
+func (e *Engine) BuildGameweekAlertsReadOnly(ctx context.Context, eventID int) ([]notify.Alert, error) {
+	return e.buildGameweekAlerts(ctx, eventID, false)
+}
+
+func (e *Engine) buildGameweekAlerts(ctx context.Context, eventID int, persistAwards bool) ([]notify.Alert, error) {
 	managerByID, err := e.getManagerDirectory(ctx)
 	if err != nil {
 		return nil, err
@@ -210,8 +221,10 @@ func (e *Engine) BuildGameweekAlerts(ctx context.Context, eventID int) ([]notify
 	}
 
 	awardsAlert, awardRows := buildGameweekAwards(e.leagueID, eventID, managerByID, playerByID, currentResults, currentManagerStats, biggestUpset)
-	if err := e.store.SaveGameweekAwards(ctx, e.leagueID, eventID, awardRows); err != nil {
-		return nil, fmt.Errorf("save awards for event %d: %w", eventID, err)
+	if persistAwards && len(awardRows) > 0 {
+		if err := e.store.SaveGameweekAwards(ctx, e.leagueID, eventID, awardRows); err != nil {
+			return nil, fmt.Errorf("save awards for event %d: %w", eventID, err)
+		}
 	}
 	if awardsAlert != nil {
 		alerts = append(alerts, notify.Alert{
