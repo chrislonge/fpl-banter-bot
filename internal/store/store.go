@@ -174,8 +174,11 @@ func (s *PostgresStore) SaveGameweekAwards(ctx context.Context, leagueID int64, 
 	}
 
 	for _, award := range awards {
+		if award.LeagueID != leagueID || award.EventID != eventID {
+			return fmt.Errorf("award %q belongs to %d/%d, want %d/%d", award.AwardKey, award.LeagueID, award.EventID, leagueID, eventID)
+		}
 		if _, err := tx.Exec(ctx, upsertGameweekAward,
-			award.LeagueID, award.EventID, award.AwardKey, award.ManagerID,
+			leagueID, eventID, award.AwardKey, award.ManagerID,
 			award.OpponentManagerID, award.PlayerElementID, award.MetricValue,
 		); err != nil {
 			return fmt.Errorf("upsert award %q: %w", award.AwardKey, err)
