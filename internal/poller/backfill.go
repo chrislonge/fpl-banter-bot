@@ -239,7 +239,10 @@ func (p *Poller) Backfill(ctx context.Context) error {
 			return err
 		}
 		if p.onFinalized == nil {
-			return fmt.Errorf("cannot rebuild awards for GW %d without an onFinalized callback", eventID)
+			p.logger.Warn("skipping award recomputation because no onFinalized callback is configured",
+				"event_id", eventID,
+			)
+			continue
 		}
 		if err := p.onFinalized(ctx, eventID); err != nil {
 			return fmt.Errorf("computing awards for GW %d: %w", eventID, err)

@@ -237,6 +237,19 @@ func TestBackfill(t *testing.T) {
 			wantCallbackEventIDs: []int{2},
 		},
 		{
+			name: "skips missing awards when callback is not configured",
+			setup: func(fc *fakeFPLClient, fs *fakeStore) {
+				fc.bootstrap = fpl.BootstrapResponse{
+					Events: makeEvents([]int{1, 2}, map[int]bool{1: true, 2: true}),
+				}
+				fs.storedEventIDs = []int{1, 2}
+				fs.storedManagerStatEventIDs = []int{1, 2}
+				fs.storedAwardEventIDs = []int{1}
+			},
+			wantSnapshots:        0,
+			wantCallbackEventIDs: []int{},
+		},
+		{
 			name:      "context cancellation",
 			cancelCtx: true,
 			setup: func(fc *fakeFPLClient, fs *fakeStore) {

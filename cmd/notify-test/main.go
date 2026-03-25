@@ -20,14 +20,12 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/chrislonge/fpl-banter-bot/internal/config"
 	"github.com/chrislonge/fpl-banter-bot/internal/fpl"
 	"github.com/chrislonge/fpl-banter-bot/internal/stats"
 	"github.com/chrislonge/fpl-banter-bot/internal/store"
-	"github.com/chrislonge/fpl-banter-bot/pkg/notify"
 	"github.com/chrislonge/fpl-banter-bot/pkg/notify/telegram"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -75,29 +73,7 @@ func main() {
 	fplClient := fpl.NewClient("https://fantasy.premierleague.com/api", &http.Client{
 		Timeout: 30 * time.Second,
 	})
-
-	var (
-		playerNamesOnce sync.Once
-		playerNames     map[int]notify.PlayerRef
-		playerNamesErr  error
-	)
-	playerLookup := stats.PlayerLookupFunc(func(ctx context.Context) (map[int]notify.PlayerRef, error) {
-		playerNamesOnce.Do(func() {
-			bootstrap, err := fplClient.GetBootstrap(ctx)
-			if err != nil {
-				playerNamesErr = err
-				return
-			}
-			playerNames = make(map[int]notify.PlayerRef, len(bootstrap.Elements))
-			for _, element := range bootstrap.Elements {
-				playerNames[element.ID] = notify.PlayerRef{
-					ElementID: element.ID,
-					Name:      element.WebName,
-				}
-			}
-		})
-		return playerNames, playerNamesErr
-	})
+	playerLookup := newPlayerLookup(fplClient)
 	statsEngine := stats.NewWithPlayerLookup(appStore, int64(cfg.FPLLeagueID), playerLookup)
 
 	if *verify {
