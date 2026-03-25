@@ -46,7 +46,7 @@ func runVerification(ctx context.Context, appStore store.Store, statsEngine *sta
 
 	summaries := make([]verificationSummary, 0, len(eventIDs))
 	for _, eventID := range eventIDs {
-		alerts, err := statsEngine.BuildGameweekAlerts(ctx, eventID)
+		alerts, err := statsEngine.BuildGameweekAlertsReadOnly(ctx, eventID)
 		if err != nil {
 			return fmt.Errorf("build alerts for event %d: %w", eventID, err)
 		}
