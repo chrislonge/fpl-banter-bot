@@ -20,6 +20,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -30,6 +31,7 @@ import (
 	"github.com/chrislonge/fpl-banter-bot/internal/config"
 	"github.com/chrislonge/fpl-banter-bot/internal/fpl"
 	"github.com/chrislonge/fpl-banter-bot/internal/poller"
+	"github.com/chrislonge/fpl-banter-bot/internal/stats"
 	"github.com/chrislonge/fpl-banter-bot/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -82,6 +84,7 @@ func main() {
 
 	// Store + poller — same wiring as cmd/bot/main.go.
 	appStore := store.New(pool)
+	statsEngine := stats.New(appStore, int64(cfg.FPLLeagueID))
 	pollerCfg := poller.Config{
 		LeagueID:           cfg.FPLLeagueID,
 		LeagueType:         cfg.FPLLeagueType,
@@ -90,9 +93,14 @@ func main() {
 		ProcessingInterval: time.Duration(cfg.PollProcessingInterval) * time.Second,
 	}
 
-	// Create the poller with nil callback — backfill only persists data,
-	// it never fires the stats engine.
-	p, err := poller.New(fplClient, appStore, pollerCfg, nil)
+	onBackfillEvent := func(ctx context.Context, eventID int) error {
+		if _, err := statsEngine.BuildGameweekAlerts(ctx, eventID); err != nil {
+			return fmt.Errorf("build alerts for event %d: %w", eventID, err)
+		}
+		return nil
+	}
+
+	p, err := poller.New(fplClient, appStore, pollerCfg, onBackfillEvent)
 	if err != nil {
 		slog.Error("failed to create poller", "error", err)
 		os.Exit(1)

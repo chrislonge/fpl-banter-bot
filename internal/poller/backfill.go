@@ -10,8 +10,7 @@ import (
 	"github.com/chrislonge/fpl-banter-bot/internal/store"
 )
 
-// Backfill populates the database with historical gameweek data for any
-// finished gameweeks that don't already have snapshots stored.
+// Backfill populates and enriches the current season's finished gameweeks.
 //
 // This is a one-time recovery operation for when the bot was deployed
 // mid-season. For example, if the bot started at GW30, backfill will
@@ -33,8 +32,8 @@ import (
 // to trust rank diffs from these gameweeks.
 //
 // API OPTIMIZATION: We fetch standings once and each manager's history
-// once, then iterate over missing gameweeks. For a 14-manager league,
-// that's 15 API calls total regardless of how many GWs need backfilling.
+// once when snapshot or manager-stat enrichment is needed, then reuse
+// that data across current-season gameweeks.
 func (p *Poller) Backfill(ctx context.Context) error {
 	// Step 1: Refresh bootstrap to know which events exist and are finished.
 	if err := p.refreshBootstrap(ctx); err != nil {
@@ -53,90 +52,101 @@ func (p *Poller) Backfill(ctx context.Context) error {
 		return nil
 	}
 
-	// Step 3: Get already-stored event IDs from the database.
-	//
-	// Go idiom — SET DIFFERENCE INSTEAD OF MAX:
-	//
-	// We compute missing = finishedSet - storedSet rather than using
-	// MAX(event_id) + 1. This correctly handles:
-	//   - DB has only GW30 → backfills 1-29
-	//   - DB has GW1, 2, 5 → backfills 3, 4 (plus any other finished GWs)
-	//   - DB has all GWs → no-op
+	// Step 3: Load current coverage for snapshots, manager stats, and awards.
 	leagueID := int64(p.cfg.LeagueID)
 	storedIDs, err := p.store.GetStoredEventIDs(ctx, leagueID)
 	if err != nil {
 		return fmt.Errorf("getting stored event IDs: %w", err)
 	}
-	storedSet := make(map[int]bool, len(storedIDs))
-	for _, id := range storedIDs {
-		storedSet[id] = true
+	managerStatIDs, err := p.store.GetStoredManagerStatEventIDs(ctx, leagueID)
+	if err != nil {
+		return fmt.Errorf("getting stored manager stat event IDs: %w", err)
+	}
+	awardIDs, err := p.store.GetStoredAwardEventIDs(ctx, leagueID)
+	if err != nil {
+		return fmt.Errorf("getting stored award event IDs: %w", err)
 	}
 
-	// Step 4: Compute the missing event IDs.
-	var missing []int
+	storedSet := idsToSet(storedIDs)
+	managerStatSet := idsToSet(managerStatIDs)
+	awardSet := idsToSet(awardIDs)
+
+	// Step 4: Compute current-season gaps.
+	var (
+		missingSnapshots    []int
+		missingManagerStats []int
+		missingAwards       []int
+	)
 	for id := range finishedSet {
 		if !storedSet[id] {
-			missing = append(missing, id)
+			missingSnapshots = append(missingSnapshots, id)
+			continue
+		}
+		if !managerStatSet[id] {
+			missingManagerStats = append(missingManagerStats, id)
+			continue
+		}
+		if !awardSet[id] {
+			missingAwards = append(missingAwards, id)
 		}
 	}
-	sort.Ints(missing)
+	sort.Ints(missingSnapshots)
+	sort.Ints(missingManagerStats)
+	sort.Ints(missingAwards)
 
-	if len(missing) == 0 {
-		p.logger.Info("no backfill needed — all finished gameweeks already stored")
+	if len(missingSnapshots) == 0 && len(missingManagerStats) == 0 && len(missingAwards) == 0 {
+		p.logger.Info("no backfill needed — current-season finished gameweeks already have snapshots, manager stats, and awards")
 		return nil
 	}
 
-	p.logger.Info("starting backfill",
-		"missing_gameweeks", len(missing),
-		"first", missing[0],
-		"last", missing[len(missing)-1],
+	p.logger.Info("starting current-season backfill/enrichment",
+		"missing_snapshots", len(missingSnapshots),
+		"missing_manager_stats", len(missingManagerStats),
+		"missing_awards", len(missingAwards),
 	)
-	p.logger.Warn("backfilled standings reflect current cumulative values, not historical — tagged as synthetic")
-
-	// Step 5: Fetch standings once — reused for all missing GWs.
-	standingsResp, err := p.fpl.GetAllH2HStandings(ctx, p.cfg.LeagueID)
-	if err != nil {
-		return fmt.Errorf("fetching standings: %w", err)
+	if len(missingSnapshots) > 0 {
+		p.logger.Warn("backfilled standings reflect current cumulative values, not historical — tagged as synthetic")
 	}
 
-	if err := rateLimitDelay(ctx, p.rateLimitDelay); err != nil {
-		return err
-	}
-
-	// Step 6: Upsert league + managers (FK prerequisites).
-	league := mapLeague(standingsResp.League, p.cfg.LeagueType)
-	if err := p.store.UpsertLeague(ctx, league); err != nil {
-		return fmt.Errorf("upserting league: %w", err)
-	}
-	for _, entry := range standingsResp.Standings.Results {
-		manager := mapManager(leagueID, entry)
-		if err := p.store.UpsertManager(ctx, manager); err != nil {
-			return fmt.Errorf("upserting manager %d: %w", entry.EntryID, err)
+	needManagerData := len(missingSnapshots) > 0 || len(missingManagerStats) > 0
+	var (
+		standingsResp fpl.H2HStandingsResponse
+		histories     map[int]fpl.ManagerHistoryResponse
+	)
+	if needManagerData {
+		// Step 5: Fetch standings once — reused for all snapshot/stat enrichments.
+		standingsResp, err = p.fpl.GetAllH2HStandings(ctx, p.cfg.LeagueID)
+		if err != nil {
+			return fmt.Errorf("fetching standings: %w", err)
 		}
-	}
 
-	// Step 7: Fetch each manager's history once — extract chips per GW later.
-	//
-	// Go concept — MAP LITERAL TYPE:
-	//
-	// histories is a map from manager ID (int) to the full history response.
-	// We fetch once per manager and then extract chips for each GW in the
-	// loop below. This avoids N*M API calls (N managers * M gameweeks).
-	histories := make(map[int]fpl.ManagerHistoryResponse, len(standingsResp.Standings.Results))
-	for _, entry := range standingsResp.Standings.Results {
 		if err := rateLimitDelay(ctx, p.rateLimitDelay); err != nil {
 			return err
 		}
-		history, err := p.fpl.GetManagerHistory(ctx, entry.EntryID)
-		if err != nil {
-			return fmt.Errorf("fetching history for manager %d: %w", entry.EntryID, err)
+
+		// Step 6: Upsert league + managers (FK prerequisites).
+		league := mapLeague(standingsResp.League, p.cfg.LeagueType)
+		if err := p.store.UpsertLeague(ctx, league); err != nil {
+			return fmt.Errorf("upserting league: %w", err)
 		}
-		histories[entry.EntryID] = history
+		for _, entry := range standingsResp.Standings.Results {
+			manager := mapManager(leagueID, entry)
+			if err := p.store.UpsertManager(ctx, manager); err != nil {
+				return fmt.Errorf("upserting manager %d: %w", entry.EntryID, err)
+			}
+		}
+
+		// Step 7: Fetch each manager's season history once.
+		histories, err = p.fetchManagerHistories(ctx, standingsResp.Standings.Results)
+		if err != nil {
+			return err
+		}
 	}
 
-	// Step 8: Iterate over missing GWs and persist snapshots.
-	for i, eventID := range missing {
-		// Check for graceful shutdown between iterations.
+	processed := 0
+	total := len(missingSnapshots) + len(missingManagerStats) + len(missingAwards)
+
+	for _, eventID := range missingSnapshots {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -144,12 +154,13 @@ func (p *Poller) Backfill(ctx context.Context) error {
 		// Map standings for this GW (same standings data, different eventID).
 		standings := mapStandings(leagueID, eventID, standingsResp.Standings.Results)
 
-		// Collect chips from all managers for this specific GW.
-		var allChips []store.ChipUsage
-		for _, entry := range standingsResp.Standings.Results {
-			history := histories[entry.EntryID]
-			chips := mapChipUsages(leagueID, eventID, int64(entry.EntryID), history.Chips)
-			allChips = append(allChips, chips...)
+		allChips, err := chipsForEvent(leagueID, eventID, standingsResp.Standings.Results, histories)
+		if err != nil {
+			return err
+		}
+		managerStats, err := p.buildManagerStatsForEvent(ctx, leagueID, eventID, standingsResp.Standings.Results, histories)
+		if err != nil {
+			return err
 		}
 
 		// Fetch and map the event's actual H2H fixtures.
@@ -162,24 +173,86 @@ func (p *Poller) Backfill(ctx context.Context) error {
 		}
 		results := mapH2HResults(leagueID, eventID, matchesResp.Results)
 
-		// Persist the snapshot atomically (standings + chips + results + meta).
-		meta := store.SnapshotMeta{
-			LeagueID:          leagueID,
-			EventID:           eventID,
-			Source:            "backfill",
-			StandingsFidelity: "synthetic",
+		snap := store.GameweekSnapshot{
+			Standings:    standings,
+			Chips:        allChips,
+			Results:      results,
+			ManagerStats: managerStats,
+			Meta: store.SnapshotMeta{
+				LeagueID:          leagueID,
+				EventID:           eventID,
+				Source:            "backfill",
+				StandingsFidelity: "synthetic",
+			},
 		}
-		if err := p.store.SaveGameweekSnapshot(ctx, standings, allChips, results, meta); err != nil {
+		if err := p.store.SaveGameweekSnapshot(ctx, snap); err != nil {
 			return fmt.Errorf("saving snapshot for GW %d: %w", eventID, err)
 		}
+		if p.onFinalized != nil {
+			if err := p.onFinalized(ctx, eventID); err != nil {
+				return fmt.Errorf("computing awards for GW %d after snapshot backfill: %w", eventID, err)
+			}
+		}
 
+		processed++
 		p.logger.Info("backfilled gameweek",
 			"event_id", eventID,
-			"progress", fmt.Sprintf("%d/%d", i+1, len(missing)),
+			"progress", fmt.Sprintf("%d/%d", processed, total),
 		)
 	}
 
-	p.logger.Info("backfill complete", "total", len(missing))
+	for _, eventID := range missingManagerStats {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		managerStats, err := p.buildManagerStatsForEvent(ctx, leagueID, eventID, standingsResp.Standings.Results, histories)
+		if err != nil {
+			return err
+		}
+		meta, err := p.store.GetSnapshotMeta(ctx, leagueID, eventID)
+		if err != nil {
+			return fmt.Errorf("getting snapshot meta for GW %d: %w", eventID, err)
+		}
+
+		if err := p.store.SaveGameweekSnapshot(ctx, store.GameweekSnapshot{
+			ManagerStats: managerStats,
+			Meta:         meta,
+		}); err != nil {
+			return fmt.Errorf("saving manager stats for GW %d: %w", eventID, err)
+		}
+		if p.onFinalized != nil {
+			if err := p.onFinalized(ctx, eventID); err != nil {
+				return fmt.Errorf("computing awards for GW %d after manager-stat enrichment: %w", eventID, err)
+			}
+		}
+
+		processed++
+		p.logger.Info("enriched gameweek manager stats",
+			"event_id", eventID,
+			"progress", fmt.Sprintf("%d/%d", processed, total),
+		)
+	}
+
+	for _, eventID := range missingAwards {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if p.onFinalized == nil {
+			return fmt.Errorf("cannot rebuild awards for GW %d without an onFinalized callback", eventID)
+		}
+		if err := p.onFinalized(ctx, eventID); err != nil {
+			return fmt.Errorf("computing awards for GW %d: %w", eventID, err)
+		}
+
+		processed++
+		p.logger.Info("recomputed gameweek awards",
+			"event_id", eventID,
+			"progress", fmt.Sprintf("%d/%d", processed, total),
+		)
+	}
+
+	p.logger.Info("backfill complete", "total", processed)
 	return nil
 }
 

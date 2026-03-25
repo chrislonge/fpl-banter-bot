@@ -21,15 +21,31 @@ type Store interface {
 	GetChipUsage(ctx context.Context, leagueID int64, eventID int) ([]store.ChipUsage, error)
 	GetH2HResults(ctx context.Context, leagueID int64, eventID int) ([]store.H2HResult, error)
 	GetH2HResultsRange(ctx context.Context, leagueID int64, fromEvent int, toEvent int) ([]store.H2HResult, error)
+	GetGameweekManagerStats(ctx context.Context, leagueID int64, eventID int) ([]store.GameweekManagerStat, error)
 	GetManagers(ctx context.Context, leagueID int64) ([]store.Manager, error)
 	GetLatestEventID(ctx context.Context, leagueID int64) (int, error)
 	GetSnapshotMeta(ctx context.Context, leagueID int64, eventID int) (store.SnapshotMeta, error)
+	SaveGameweekAwards(ctx context.Context, leagueID int64, eventID int, awards []store.GameweekAward) error
+}
+
+// PlayerLookup provides optional current-season player display names.
+// Awards fall back gracefully when this data is unavailable.
+type PlayerLookup interface {
+	PlayerNames(ctx context.Context) (map[int]notify.PlayerRef, error)
+}
+
+// PlayerLookupFunc adapts a function to the PlayerLookup interface.
+type PlayerLookupFunc func(ctx context.Context) (map[int]notify.PlayerRef, error)
+
+func (f PlayerLookupFunc) PlayerNames(ctx context.Context) (map[int]notify.PlayerRef, error) {
+	return f(ctx)
 }
 
 // Engine computes alert-worthy stats for a single league.
 type Engine struct {
-	store    Store
-	leagueID int64
+	store        Store
+	leagueID     int64
+	playerLookup PlayerLookup
 }
 
 // CurrentStreak describes a manager's active win or loss streak.
@@ -61,9 +77,15 @@ type eventOutcome struct {
 
 // New constructs a stats engine for one league.
 func New(store Store, leagueID int64) *Engine {
+	return NewWithPlayerLookup(store, leagueID, nil)
+}
+
+// NewWithPlayerLookup constructs a stats engine with optional player lookup.
+func NewWithPlayerLookup(store Store, leagueID int64, playerLookup PlayerLookup) *Engine {
 	return &Engine{
-		store:    store,
-		leagueID: leagueID,
+		store:        store,
+		leagueID:     leagueID,
+		playerLookup: playerLookup,
 	}
 }
 
@@ -89,7 +111,14 @@ func (e *Engine) BuildGameweekAlerts(ctx context.Context, eventID int) ([]notify
 		return nil, fmt.Errorf("get h2h results for event %d: %w", eventID, err)
 	}
 
-	alerts := make([]notify.Alert, 0, len(currentStandings)+len(currentChips)+len(currentResults)+2)
+	currentManagerStats, err := e.store.GetGameweekManagerStats(ctx, e.leagueID, eventID)
+	if err != nil {
+		return nil, fmt.Errorf("get manager stats for event %d: %w", eventID, err)
+	}
+
+	playerByID := e.getPlayerDirectory(ctx)
+
+	alerts := make([]notify.Alert, 0, len(currentStandings)+len(currentChips)+len(currentResults)+3)
 
 	currentHistorical, err := e.hasHistoricalStandings(ctx, eventID)
 	if err != nil {
@@ -169,12 +198,27 @@ func (e *Engine) BuildGameweekAlerts(ctx context.Context, eventID int) ([]notify
 		})
 	}
 
+	var biggestUpset *notify.UpsetAlert
 	if summary, ok := buildGameweekSummary(managerByID, currentResults, prevRanks, prevHistorical); ok {
+		biggestUpset = summary.BiggestUpset
 		alerts = append(alerts, notify.Alert{
 			Kind:            notify.AlertKindGameweekSummary,
 			LeagueID:        e.leagueID,
 			EventID:         eventID,
 			GameweekSummary: summary,
+		})
+	}
+
+	awardsAlert, awardRows := buildGameweekAwards(e.leagueID, eventID, managerByID, playerByID, currentResults, currentManagerStats, biggestUpset)
+	if err := e.store.SaveGameweekAwards(ctx, e.leagueID, eventID, awardRows); err != nil {
+		return nil, fmt.Errorf("save awards for event %d: %w", eventID, err)
+	}
+	if awardsAlert != nil {
+		alerts = append(alerts, notify.Alert{
+			Kind:           notify.AlertKindGameweekAwards,
+			LeagueID:       e.leagueID,
+			EventID:        eventID,
+			GameweekAwards: awardsAlert,
 		})
 	}
 
@@ -298,6 +342,18 @@ func (e *Engine) getManagerDirectory(ctx context.Context) (map[int64]notify.Mana
 		}
 	}
 	return managerByID, nil
+}
+
+func (e *Engine) getPlayerDirectory(ctx context.Context) map[int]notify.PlayerRef {
+	if e.playerLookup == nil {
+		return map[int]notify.PlayerRef{}
+	}
+
+	playerByID, err := e.playerLookup.PlayerNames(ctx)
+	if err != nil {
+		return map[int]notify.PlayerRef{}
+	}
+	return playerByID
 }
 
 func (e *Engine) hasHistoricalStandings(ctx context.Context, eventID int) (bool, error) {

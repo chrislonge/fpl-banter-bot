@@ -87,6 +87,15 @@ func summaryAlert(eventID int, leagueID int64, high notify.ManagerScore, low not
 	}
 }
 
+func awardsAlert(eventID int, leagueID int64, awards *notify.GameweekAwardsAlert) notify.Alert {
+	return notify.Alert{
+		Kind:           notify.AlertKindGameweekAwards,
+		LeagueID:       leagueID,
+		EventID:        eventID,
+		GameweekAwards: awards,
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -311,6 +320,95 @@ func TestFormatAlerts_AllKindsPresent(t *testing.T) {
 	}
 	if !strings.Contains(combined, "absolutely mugged") {
 		t.Error("expected upset banter")
+	}
+}
+
+func TestFormatAlerts_AwardsFirstSuppressesLegacySummary(t *testing.T) {
+	chris := managerRef(1, "Chris")
+	dave := managerRef(2, "Dave")
+
+	alerts := []notify.Alert{
+		summaryAlert(10, 100,
+			notify.ManagerScore{Manager: chris, Score: 65},
+			notify.ManagerScore{Manager: dave, Score: 42},
+			nil,
+		),
+		h2hAlert(10, 100, chris, 65, dave, 42, int64Ptr(1)),
+		awardsAlert(10, 100, &notify.GameweekAwardsAlert{
+			ManagerOfTheWeek: &notify.ManagerScore{Manager: chris, Score: 65},
+			WoodenSpoon:      &notify.ManagerScore{Manager: dave, Score: 42},
+			CaptainGenius: &notify.CaptainAwardAlert{
+				Manager:           chris,
+				Captain:           notify.PlayerRef{ElementID: 1, Name: "B.Fernandes"},
+				CaptainPoints:     13,
+				CaptainMultiplier: 2,
+				TotalPoints:       26,
+			},
+			ArmbandOfShame: &notify.ArmbandOfShameAlert{
+				Manager:          dave,
+				Captain:          notify.PlayerRef{ElementID: 2, Name: "Haaland"},
+				CaptainPoints:    0,
+				ConsensusCaptain: notify.PlayerRef{ElementID: 1, Name: "B.Fernandes"},
+				ConsensusPoints:  13,
+			},
+			BenchWarmer: &notify.BenchWarmerAwardAlert{
+				Manager:       dave,
+				PointsOnBench: 17,
+			},
+			BiggestThrashing: &notify.MatchupAwardAlert{
+				Winner:      chris,
+				WinnerScore: 65,
+				Loser:       dave,
+				LoserScore:  42,
+				Margin:      23,
+			},
+			LuckiestWin: &notify.MatchupAwardAlert{
+				Winner:      chris,
+				WinnerScore: 38,
+				Loser:       dave,
+				LoserScore:  33,
+				Margin:      5,
+			},
+			UnluckiestLoss: &notify.UnluckiestLossAlert{
+				Loser:         dave,
+				LoserScore:    60,
+				Opponent:      chris,
+				OpponentScore: 65,
+				Margin:        5,
+			},
+		}),
+	}
+
+	msgs, err := FormatAlerts(alerts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	combined := strings.Join(msgs, "\n\n")
+	awardsIdx := strings.Index(combined, "<b>Awards Ceremony</b>")
+	resultsIdx := strings.Index(combined, "<b>Results</b>")
+	if awardsIdx == -1 || resultsIdx == -1 {
+		t.Fatalf("expected awards and results sections in output:\n%s", combined)
+	}
+	if awardsIdx >= resultsIdx {
+		t.Fatal("Awards Ceremony should appear before Results")
+	}
+	if strings.Contains(combined, "<b>Summary</b>") {
+		t.Fatal("legacy Summary section should be suppressed when awards are present")
+	}
+
+	for _, want := range []string{
+		"💩 Wooden Spoon: <b>Dave</b> took the spoon with 42 pts",
+		"🎯 Captain Genius: <b>Chris</b> backed <b>B.Fernandes</b> for 26 pts",
+		"🤡 Armband of Shame: <b>Dave</b> trusted <b>Haaland</b> (0 pts) while <b>B.Fernandes</b> hauled 13",
+		"🪑 Bench Warmer: <b>Dave</b> stranded 17 pts on the bench",
+		"💀 Biggest Thrashing: <b>Chris</b> steamrolled Dave 65-42",
+		"🎰 Luckiest Win: <b>Chris</b> snuck past Dave 38-33",
+		"😤 Unluckiest Loss: <b>Dave</b> lost 60-65 to Chris and still beats everyone else this week",
+	} {
+		if !strings.Contains(combined, want) {
+			t.Errorf("expected %q in output:\n%s", want, combined)
+		}
 	}
 }
 

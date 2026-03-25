@@ -262,6 +262,16 @@ func (c *Client) GetEventStatus(ctx context.Context) (EventStatusResponse, error
 	return resp, nil
 }
 
+// GetEventLive fetches the per-player live/finalized points for a gameweek.
+func (c *Client) GetEventLive(ctx context.Context, eventID int) (EventLiveResponse, error) {
+	var resp EventLiveResponse
+	path := fmt.Sprintf("event/%d/live/", eventID)
+	if err := c.do(ctx, path, &resp); err != nil {
+		return EventLiveResponse{}, err
+	}
+	return resp, nil
+}
+
 // GetH2HStandings fetches a single page of head-to-head league standings.
 // Pages are 1-indexed. Use GetAllH2HStandings to fetch all pages automatically.
 func (c *Client) GetH2HStandings(ctx context.Context, leagueID int, page int) (H2HStandingsResponse, error) {

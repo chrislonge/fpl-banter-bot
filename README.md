@@ -1,115 +1,89 @@
 # fpl-banter-bot
 
-> **Status:** Phase 1 complete — the full pipeline is wired. The bot polls the FPL API, posts gameweek alerts automatically, and responds to Telegram commands (`/standings`, `/streak`, `/history`, `/deadline`).
+A self-hosted Fantasy Premier League banter bot for head-to-head mini-leagues. It watches the FPL API, stores each finished gameweek in Postgres, posts a recap to Telegram, and answers a small set of league commands on demand.
 
-A self-hosted bot that tracks your Fantasy Premier League mini-league and posts banter-worthy stats to your group chat after each gameweek. Built in Go, runs on a Raspberry Pi.
+## What the bot does
 
-## What it does
+After a gameweek finalizes, the bot builds a single recap that leads with a gameweek awards ceremony and then follows with the rest of the weekly banter:
 
-The bot watches your H2H mini-league via the FPL API and automatically detects interesting events:
+- `🏆 Manager of the Week`
+- `💩 Wooden Spoon`
+- `🎯 Captain Genius`
+- `🤡 Armband of Shame`
+- `🪑 Bench Warmer`
+- `💀 Biggest Thrashing`
+- `🎰 Luckiest Win`
+- `😤 Unluckiest Loss`
+- rank changes
+- win and loss streaks
+- chip usage
+- H2H results
 
-- **Rank changes** — "Sarah moves to 1st place for the first time this season!"
-- **Win/loss streaks** — "Marcus just hit a 3-game winning streak!"
-- **Chip usage** — "James used Triple Captain on Haaland... and scored 27 points."
-- **Gameweek summaries** — high scorer, low scorer, biggest upset
-- **H2H results** — who beat who this week, with scores
+The bot also supports Telegram commands for quick lookups:
 
-No manual checking required. Alerts are posted to your group chat automatically.
+- `/standings`
+- `/streak`
+- `/history <manager1> <manager2>`
+- `/deadline`
 
-Group members can also query the bot directly:
-
-- `/standings` — current league table
-- `/streak` — active win/loss streaks
-- `/history <manager1> <manager2>` — head-to-head record between two managers (by rank or name prefix)
-- `/deadline` — next gameweek deadline (configurable timezone, defaults to London)
-
-Commands are registered with Telegram on startup via the Bot API, so users see autocomplete suggestions when typing `/`. See [docs/telegram.md](docs/telegram.md) for full Telegram setup, webhook configuration, and how to add new commands.
-
-## Architecture
+## How it works
 
 ```mermaid
 flowchart TB
     subgraph External
-        FPL["FPL API\n(fantasy.premierleague.com)"]
+        FPL["FPL API"]
         TG["Telegram Bot API"]
-        USER["Telegram User\n(/commands)"]
+        USER["Telegram User"]
     end
 
     subgraph "fpl-banter-bot"
-        direction TB
-        MAIN["cmd/bot/main.go\nEntrypoint + errgroup shutdown"]
-        CONFIG["config\nEnv vars"]
-        CLIENT["fpl.Client\nHTTP client"]
-        STORE["store.Store\nPostgres persistence"]
-        POLLER["poller\nIdle → Live → Processing"]
-        STATS["stats.Engine\nDiff + alert detection"]
-        NOTIFY["notify.Notifier\nChat platform interface"]
-        BOT["bot.Handler\nWebhook + command router\n/health endpoint"]
+        MAIN["cmd/bot"]
+        POLLER["internal/poller"]
+        STATS["internal/stats"]
+        BOT["internal/bot"]
+        STORE["internal/store"]
+        CLIENT["internal/fpl"]
+        NOTIFY["pkg/notify/telegram"]
     end
 
-    subgraph Infrastructure
+    subgraph Infra
         PG[("PostgreSQL")]
-        TUNNEL["Tailscale Funnel\n(webhook reachability)"]
+        WEB["Public HTTPS webhook"]
     end
 
-    %% Proactive path
     MAIN --> POLLER
-    POLLER -- "polls" --> CLIENT
-    CLIENT -- "HTTP" --> FPL
-    POLLER -- "snapshots" --> STORE
-    STORE -- "pgx" --> PG
-    POLLER -- "on finalize" --> STATS
-    STATS -- "reads" --> STORE
-    STATS -- "alerts" --> NOTIFY
-    NOTIFY -- "HTTP" --> TG
-
-    %% Reactive path
-    USER -- "/command" --> TUNNEL
-    TUNNEL -- "POST /webhook/secret" --> BOT
-    BOT -- "queries" --> STATS
-    BOT -- "queries" --> STORE
-    BOT -- "queries" --> CLIENT
-    BOT -- "reply" --> NOTIFY
-
-    style CONFIG fill:#2d6a2d,stroke:#4a4,color:#fff
-    style CLIENT fill:#2d6a2d,stroke:#4a4,color:#fff
-    style STORE fill:#2d6a2d,stroke:#4a4,color:#fff
-    style MAIN fill:#2d6a2d,stroke:#4a4,color:#fff
-    style POLLER fill:#2d6a2d,stroke:#4a4,color:#fff
-    style STATS fill:#2d6a2d,stroke:#4a4,color:#fff
-    style NOTIFY fill:#2d6a2d,stroke:#4a4,color:#fff
-    style BOT fill:#2d6a2d,stroke:#4a4,color:#fff
-    style TUNNEL fill:#2d6a2d,stroke:#4a4,color:#fff
+    POLLER --> CLIENT
+    CLIENT --> FPL
+    POLLER --> STORE
+    STORE --> PG
+    POLLER --> STATS
+    STATS --> STORE
+    STATS --> NOTIFY
+    NOTIFY --> TG
+    USER --> WEB
+    WEB --> BOT
+    BOT --> STORE
+    BOT --> STATS
+    BOT --> CLIENT
+    BOT --> TG
 ```
 
-**Two data paths:**
-- **Proactive** — poller detects gameweek finalization → stats computes alerts → Telegram delivery (automatic)
-- **Reactive** — user sends a command in Telegram → webhook → bot routes to handler → reply sent
+There are two main paths through the system:
 
-## Tech stack
-
-- **Go** — single binary, ~15MB Docker image
-- **PostgreSQL** — standings history, multi-tenant from day one
-- **Telegram Bot API** — chat delivery (more platforms planned via the `Notifier` interface)
-- **Docker Compose** — local dev and deployment
+- Proactive: the poller detects that a gameweek has finalized, persists the snapshot, computes the recap, and sends it to Telegram.
+- Reactive: a Telegram user sends a command and the webhook handler replies with data from the store, stats engine, or FPL API.
 
 ## Quick start
 
 ### Prerequisites
 
-- Go 1.26+
-- Docker and Docker Compose (via [Docker Desktop](https://www.docker.com/products/docker-desktop/) or [OrbStack](https://orbstack.dev/))
-- (Optional) [`golang-migrate`](https://github.com/golang-migrate/migrate) CLI — only needed for manual migration management. The bot runs migrations automatically on startup.
+- Go `1.26+`
+- Docker and Docker Compose
+- A Postgres connection string
+- Your FPL league ID
+- Telegram bot credentials if you want chat delivery
 
-```bash
-# macOS (optional)
-brew install golang-migrate
-```
-
-> **Note:** If you have a local Postgres installed (e.g., via Homebrew or Postgres.app), stop it before starting the Docker database to avoid port 5432 conflicts:
-> ```bash
-> brew services stop postgresql@14  # adjust version as needed
-> ```
+`golang-migrate` is optional. Migrations run automatically on startup.
 
 ### 1. Clone and configure
 
@@ -117,285 +91,197 @@ brew install golang-migrate
 git clone https://github.com/chrislonge/fpl-banter-bot.git
 cd fpl-banter-bot
 cp .env.example .env
-# Edit .env with your league ID and database URL.
-# Telegram credentials are optional — see Configuration.
 ```
 
-`.env.example` is the documented template (committed to git). `.env` holds your local values and is gitignored — never commit it.
+Edit `.env` with your league, database, and Telegram values.
 
-### 2. Start the database
+### 2. Start Postgres
 
 ```bash
 make db-up
-# or: docker compose up -d db
 ```
 
 ### 3. Run the bot
 
 ```bash
 make run
-# or: go run cmd/bot/main.go
 ```
 
-Migrations run automatically on startup — no manual migration step needed. The migration SQL files are embedded in the binary via Go's `//go:embed`, so there are no external files to deploy.
+The bot will:
 
-The bot starts the polling state machine, which adaptively polls the FPL API based on the gameweek lifecycle (idle between GWs, frequent during live matches, very frequent while waiting for finalization). When a gameweek finalizes, it collects standings and chip usage data and persists them to Postgres.
+- run embedded database migrations
+- connect to the FPL API
+- start the gameweek lifecycle poller
+- optionally register Telegram commands and start the webhook server when Telegram is configured
 
-**Graceful shutdown:** Press `Ctrl+C` or send `SIGTERM` to trigger a clean shutdown. The bot finishes its current poll cycle, closes database connections, and exits.
+### 4. Configure Telegram delivery
 
-### Operating modes
+If `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set, the bot runs in full mode and sends recaps automatically. Telegram webhooks require a public HTTPS URL, so you also need `WEBHOOK_BASE_URL`.
 
-The bot supports two operating modes, controlled by whether Telegram credentials are present:
-
-| Mode | Telegram vars | Behavior |
-|------|---------------|----------|
-| **Data collection only** | Omitted | Polls the FPL API, persists standings and chip data to Postgres. No notifications sent, no webhook server started. |
-| **Full** | Both set | Polls and persists data, computes stats diffs, sends gameweek alerts automatically, and serves the webhook endpoint for Telegram commands. Requires `WEBHOOK_BASE_URL`. |
-
-Data-collection-only mode is useful for building up historical data before enabling notifications, or for running the bot purely as a data pipeline. Setting only one of `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` is treated as a misconfiguration and the bot will refuse to start.
-
-**Full mode requires a publicly reachable HTTPS URL** so Telegram can deliver webhook updates. [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel) is the recommended approach — it provides a stable `*.ts.net` URL with automatic TLS, no port forwarding, and works well on both dev machines and Raspberry Pi deployments:
+Tailscale Funnel works well for this:
 
 ```bash
-# Tailscale Funnel (recommended)
-# --bg persists across reboots via the Tailscale daemon
 sudo tailscale funnel --bg 8080
-# → set WEBHOOK_BASE_URL=https://your-machine.tail<id>.ts.net in .env
 ```
 
-Other tunnel options ([ngrok](https://ngrok.com/), [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)) also work — any tool that gives you a public HTTPS URL proxying to `localhost:8080` is sufficient.
+Set `WEBHOOK_BASE_URL` to the resulting `https://...ts.net` URL.
 
-> **Tailscale Funnel setup notes:**
-> - Requires the **standalone** Tailscale install (not App Store on macOS — the sandbox blocks Funnel).
-> - MagicDNS, HTTPS certificates, and the `funnel` node attribute must be enabled in the Tailscale admin console.
-> - **Rename your machine** to something neutral before enabling HTTPS — machine names are permanently recorded in public [Certificate Transparency](https://certificate.transparency.dev/) logs.
+If Telegram credentials are omitted, the bot still polls FPL and stores data, but it does not send notifications or start the webhook server.
 
-On startup the bot registers its webhook URL with Telegram and deregisters it on clean shutdown.
+## Current-season backfill and enrichment
 
-### 4. Backfill historical gameweeks (optional)
-
-If the bot was deployed mid-season, it only has data from the gameweek it first ran. The backfill command populates all previous finished gameweeks:
+If the bot started after the season was already underway, you can fill in missing finished gameweeks from the current season:
 
 ```bash
-# Local development (Go required)
 make backfill
-# or: go run cmd/backfill/main.go
-
-# Docker deployment (Pi or any server)
-make docker-backfill
-# or: docker compose run --rm backfill
 ```
 
-This is a one-time operation. It detects which gameweeks are missing from the database and fills the gaps. Running it again is safe (idempotent) — it skips gameweeks that already exist. Press `Ctrl+C` to cancel mid-backfill; progress is saved per-gameweek.
+For Docker-based deployments:
 
-> **Important limitation:** The FPL API does not serve historical standings snapshots — `GetAllH2HStandings()` always returns the *current* cumulative league table. This means backfilled standings (ranks, H2H points) reflect today's values, not what the table looked like at each gameweek. Chip usage and H2H match results ARE fully historical.
->
-> The bot tags every snapshot with its provenance in the `gameweek_snapshot_meta` table (`source=backfill, standings_fidelity=synthetic`), so the stats engine knows to skip rank-change alerts for synthetic standings while still using accurate chip data and real H2H results. Snapshots captured during normal live polling are tagged `source=live, standings_fidelity=historical` and are fully trustworthy.
+```bash
+make docker-backfill
+```
+
+Backfill is:
+
+- current-season only
+- idempotent
+- resumable across runs
+
+It also enriches already-stored gameweeks that are missing weekly manager stats or stored award winners.
+
+Important limitation: FPL does not provide historical league-table snapshots. Backfilled standings are tagged as synthetic because they reflect the current cumulative table, not the exact ranks from that past gameweek. H2H results, bench points, captain picks, and award calculations still use real gameweek data from the current season.
+
+## Commands
+
+Users in the configured Telegram chat can run:
+
+- `/standings` to see the current league table
+- `/streak` to see active win and loss streaks
+- `/history <manager1> <manager2>` to compare two managers head to head
+- `/deadline` to see the next deadline in the configured timezone
+
+Commands are registered with Telegram on startup, so users get autocomplete in chat.
 
 ## Configuration
 
-All configuration is via environment variables. See [`.env.example`](.env.example) for the full list.
+All configuration comes from environment variables. See [`.env.example`](.env.example) for the full template.
 
 | Variable | Required | Description |
-|----------|----------|-------------|
-| `FPL_LEAGUE_ID` | Yes | Your FPL league ID (find it in the URL of your league's page) |
-| `FPL_LEAGUE_TYPE` | No | `h2h` or `classic` (default: `h2h`) |
-| `TELEGRAM_BOT_TOKEN` | No | Token from @BotFather (omit for data-collection-only mode) |
-| `TELEGRAM_CHAT_ID` | No | Target group chat ID (omit for data-collection-only mode) |
-| `WEBHOOK_BASE_URL` | When Telegram is set | Public HTTPS URL for Telegram to deliver updates (e.g. your Tailscale Funnel `*.ts.net` URL, no trailing slash) |
-| `WEBHOOK_PORT` | No | Local port for the HTTP server (default: `8080`) |
-| `WEBHOOK_SECRET` | No | Secret path component for webhook URL security (auto-generated if omitted) |
+| --- | --- | --- |
+| `FPL_LEAGUE_ID` | Yes | Your FPL league ID |
+| `FPL_LEAGUE_TYPE` | No | League type. This bot currently supports `h2h` |
 | `DATABASE_URL` | Yes | Postgres connection string |
-| `STORE_TEST_DATABASE_URL` | No | Test database connection string (for integration tests) |
-| `POLL_IDLE_INTERVAL` | No | Seconds between polls when idle (default: `21600` — 6 hours) |
-| `POLL_LIVE_INTERVAL` | No | Seconds between polls during a live gameweek (default: `900` — 15 min) |
-| `POLL_PROCESSING_INTERVAL` | No | Seconds between polls while results are processing (default: `600` — 10 min) |
-| `DEADLINE_TIMEZONE` | No | IANA timezone for `/deadline` display (default: `Europe/London`, e.g. `America/New_York`) |
-| `LOG_LEVEL` | No | `debug`, `info`, `warn`, `error` (default: `info`) |
+| `STORE_TEST_DATABASE_URL` | No | Postgres URL for store integration tests |
+| `TELEGRAM_BOT_TOKEN` | No | Telegram bot token from BotFather |
+| `TELEGRAM_CHAT_ID` | No | Telegram chat ID to post into |
+| `WEBHOOK_BASE_URL` | When Telegram is enabled | Public HTTPS base URL for Telegram webhooks |
+| `WEBHOOK_PORT` | No | Local webhook port. Default `8080` |
+| `WEBHOOK_SECRET` | No | Secret path component for the webhook |
+| `POLL_IDLE_INTERVAL` | No | Seconds between polls when no gameweek is live |
+| `POLL_LIVE_INTERVAL` | No | Seconds between polls during a live gameweek |
+| `POLL_PROCESSING_INTERVAL` | No | Seconds between polls while FPL is still processing results |
+| `DEADLINE_TIMEZONE` | No | IANA timezone for `/deadline` |
+| `LOG_LEVEL` | No | `debug`, `info`, `warn`, or `error` |
 
-## Project structure
+## Project layout
 
-```
-cmd/bot/             Main bot entrypoint — wires everything together
-cmd/backfill/        Backfill CLI — populates historical gameweeks
-cmd/notify-test/     Pipeline diagnostic — test stats → Telegram with real data
-internal/config/     Environment variable loading + validation
-internal/fpl/        FPL HTTP client + API response types
-internal/poller/     Gameweek lifecycle state machine (Idle → Live → Processing)
-internal/bot/        Webhook server + Telegram command router (/standings, /streak, /history, /deadline)
-internal/stats/      Diff engine + alert detection
-internal/store/      Database interface + Postgres implementation + embedded migrations
-pkg/notify/          Notifier interface (public API for chat platforms)
-pkg/notify/telegram/ Telegram implementation (Bot API client + HTML formatter)
-```
-
-`internal/` packages are private to this module (compiler-enforced). `pkg/` is the public API — import `pkg/notify` to build your own chat platform adapter.
-
-## Adding a new chat platform
-
-Implement the `Notifier` interface in [`pkg/notify/notify.go`](pkg/notify/notify.go):
-
-```go
-type Notifier interface {
-    SendAlerts(ctx context.Context, alerts []Alert) error
-}
+```text
+cmd/bot/             Main bot process
+cmd/backfill/        Current-season backfill and enrichment command
+cmd/notify-test/     End-to-end recap preview tool
+internal/bot/        Telegram webhook server and command handlers
+internal/config/     Environment loading and validation
+internal/fpl/        FPL client and API response models
+internal/poller/     Gameweek lifecycle polling and snapshot collection
+internal/stats/      Alert and awards computation
+internal/store/      Postgres store, queries, and embedded migrations
+pkg/notify/          Alert types and notifier interface
+pkg/notify/telegram/ Telegram formatter and delivery client
 ```
 
-The Telegram implementation in `pkg/notify/telegram/` serves as the reference. Any struct with a matching `SendAlerts` method satisfies the interface — no registration or `implements` keyword needed.
+## Development and verification
 
-## Development
-
-A `Makefile` wraps common commands so you don't have to remember flags and connection strings. Run `make` with any target below, or use the raw commands directly.
+Common commands:
 
 ```bash
-make build        # go build ./...
-make test         # go test ./... (includes store tests if STORE_TEST_DATABASE_URL is set via .env)
-make test-store   # store integration tests against real Postgres
-make test-telegram # Telegram integration test (sends a real message to your chat)
-make test-all     # all tests including store integration
-make lint         # golangci-lint run
-make run          # go run cmd/bot/main.go
-make backfill        # go run cmd/backfill/main.go (one-time historical data)
-make docker-backfill # docker compose run --rm backfill (Docker deployment)
-make deploy          # docker compose up -d --build (build + start full stack)
-make notify-test     # test full stats → Telegram pipeline with real DB data
-make db-up           # docker compose up -d db
-make db-down         # docker compose down
-make db-reset        # destroy + recreate DB (needed after schema changes)
+make build
+make test
+make test-store
+make test-telegram
+make notify-test
+make db-up
+make db-down
+make db-reset
 ```
 
-The Makefile automatically loads your `.env` file, so variables like `STORE_TEST_DATABASE_URL` are available without typing them. That means `make test` will include store integration tests whenever your `.env` sets a test database URL.
+### Preview a real recap without sending it
 
-### Live API tests
-
-The `internal/fpl` package includes integration tests that hit the real FPL API. They are skipped by default to keep `go test ./...` fast and CI-safe.
+`cmd/notify-test` runs the full store -> stats -> Telegram formatting path against your database and prints the exact recap shape in dry-run mode.
 
 ```bash
-# Run all live API tests
+make notify-test DRY_RUN=1
+make notify-test GW=12 DRY_RUN=1
+make notify-test DRY_RUN=1 VERIFY=1 VERIFY_LAST=8
+```
+
+This is the fastest way to verify the awards-first recap before posting to Telegram.
+
+`VERIFY=1` turns on a multi-gameweek verification pass. It scans stored gameweeks, reports which awards appear or are omitted, flags missing captain data, and prints representative previews for edge cases such as missing armband-of-shame and captain-gap handling.
+
+`notify-test` is a host-side tool. For a minimal Docker-only Pi setup, the usual workflow is:
+
+- restore or copy the Pi database into a local dev database
+- run `make notify-test DRY_RUN=1` or `VERIFY=1 ... make notify-test` on your laptop
+- deploy to the Pi and run `make docker-backfill`
+
+### Run the full test suite
+
+```bash
+go test ./...
+```
+
+### Optional live API checks
+
+The `internal/fpl` package includes integration tests against the real FPL API. They are skipped by default.
+
+```bash
 FPL_LIVE_TEST=1 go test ./internal/fpl/ -run TestLiveAPI -v
-
-# Run a specific live test
-FPL_LIVE_TEST=1 go test ./internal/fpl/ -run TestLiveAPI_Bootstrap -v
-FPL_LIVE_TEST=1 go test ./internal/fpl/ -run TestLiveAPI_EventStatus -v
-FPL_LIVE_TEST=1 go test ./internal/fpl/ -run TestLiveAPI_H2HStandings -v
-FPL_LIVE_TEST=1 go test ./internal/fpl/ -run TestLiveAPI_H2HMatches -v
-FPL_LIVE_TEST=1 go test ./internal/fpl/ -run TestLiveAPI_ManagerHistory -v
 ```
-
-These tests require network access and will fail if the FPL API is unavailable. Use them to validate that your struct definitions still match the live API responses.
-If Fantasy Premier League is in its maintenance/update window and returns
-`503 "The game is being updated."`, these live tests now skip instead of
-failing so you can distinguish an upstream maintenance window from a real
-client regression.
 
 ### Store integration tests
 
-The `internal/store` package includes integration tests against a real Postgres database. They are gated behind the `STORE_TEST_DATABASE_URL` env var and skip gracefully without it.
+Store tests use a real Postgres database when `STORE_TEST_DATABASE_URL` is set.
 
 ```bash
-# Using make (loads .env automatically)
 make test-store
-
-# Or manually
-STORE_TEST_DATABASE_URL="postgres://fplbot:password@localhost:5432/fplbanterbot_test?sslmode=disable" \
-  go test ./internal/store/ -v
 ```
-
-The test database (`fplbanterbot_test`) is created automatically by [`init.sql`](init.sql) on first Postgres startup — this file runs once when Docker initialises a fresh volume. If your Postgres volume already exists, run `make db-reset` once to recreate it.
 
 ### Telegram integration test
 
-The `pkg/notify/telegram` package includes an integration test that sends a real message to your Telegram group chat. It is gated behind `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` env vars and skips gracefully without them.
+You can also send a real formatting test message to your Telegram chat:
 
 ```bash
-# Using make (loads .env automatically)
 make test-telegram
 ```
 
-This sends a hardcoded "Gameweek 99 Recap" covering every alert kind (results, rank changes, streaks, chips, summary) so you can visually verify formatting in your chat.
+## Deployment notes
 
-### Pipeline diagnostic tool
-
-The `cmd/notify-test` binary exercises the full stats → Telegram pipeline using real data from your database. Unlike the integration test above, this tests the entire chain: database reads, stats engine computation, alert formatting, and Telegram delivery.
+The bot is a good fit for a Raspberry Pi or any small always-on Linux host. Docker Compose is the simplest deployment path:
 
 ```bash
-make notify-test              # latest gameweek in the database
-make notify-test GW=5         # specific gameweek
-make notify-test DRY_RUN=1    # preview formatted messages without sending
-```
-
-This requires both Postgres (with backfilled data) and Telegram credentials. Use `DRY_RUN=1` to preview the formatted message output in your terminal before sending to Telegram.
-
-### Database management
-
-Migrations run automatically on startup via embedded SQL files — no CLI tool needed for normal use. The `golang-migrate` CLI is optional, useful for manual inspection or rollbacks.
-
-```bash
-# Start the dev database
-make db-up
-
-# Check container status
-docker compose ps
-
-# View database logs
-docker compose logs db
-
-# Connect to the database directly
-docker compose exec db psql -U fplbot -d fplbanterbot
-
-# Stop the database (data is preserved)
-make db-down
-
-# Stop the database and delete all data (fresh start)
-make db-reset
-
-# Manual migration management (optional, requires golang-migrate CLI)
-migrate -path internal/store/migrations -database "$DATABASE_URL" up
-migrate -path internal/store/migrations -database "$DATABASE_URL" down 1
-```
-
-## Deploying to a Raspberry Pi
-
-The bot is designed to run on a Raspberry Pi (ARM64). Docker builds the image natively — no cross-compilation needed.
-
-```bash
-# 1. Install Tailscale
-curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up
-
-# 2. Clone and configure
-git clone https://github.com/chrislonge/fpl-banter-bot.git
-cd fpl-banter-bot
-cp .env.example .env
-nano .env
-# IMPORTANT: set DATABASE_URL=postgres://fplbot:password@db:5432/fplbanterbot?sslmode=disable
-#            (use @db:5432, not @localhost:5432 — containers reference each other by service name)
-
-# 3. Start the stack
 make deploy
-# or: docker compose up -d --build
-
-# 4. Backfill historical gameweeks
 make docker-backfill
-
-# 5. Expose webhook to Telegram
-sudo tailscale funnel --bg 8080
 ```
 
-**Updating after code changes:**
+If your bot runs in containers, set `DATABASE_URL` to use the Postgres service name from Compose, for example `postgres://fplbot:password@db:5432/fplbanterbot?sslmode=disable`.
 
-```bash
-git pull
-docker compose up -d --build
-```
+## Limitations
 
-Docker's layer cache makes rebuilds fast when only Go source changed.
-
-## Known limitations
-
-- **H2H leagues only** — classic league support is planned but not yet implemented. The bot fails fast on startup if `FPL_LEAGUE_TYPE` is not `h2h`.
-- **Backfill standings are synthetic** — see the [backfill section](#4-backfill-historical-gameweeks-optional) for details on this FPL API limitation.
-- **Webhook requires a public URL** — in full mode, a tunnel (Tailscale Funnel, ngrok, or Cloudflare Tunnel) is needed. The bot's host must be publicly reachable over HTTPS for Telegram to deliver webhook updates.
+- Head-to-head leagues only
+- Telegram full mode requires a public HTTPS webhook URL
+- Backfill and enrichment are limited to the current season
+- Backfilled standings are synthetic because the FPL API does not expose historical league-table snapshots
 
 ## License
 

@@ -53,6 +53,7 @@ func FormatAlerts(alerts []notify.Alert) ([]string, error) {
 	// Bucket alerts by kind. The stats engine may emit them in any order;
 	// the formatter controls display order.
 	var (
+		awards      []notify.Alert
 		h2hResults  []notify.Alert
 		rankChanges []notify.Alert
 		streaks     []notify.Alert
@@ -61,6 +62,8 @@ func FormatAlerts(alerts []notify.Alert) ([]string, error) {
 	)
 	for _, a := range alerts {
 		switch a.Kind {
+		case notify.AlertKindGameweekAwards:
+			awards = append(awards, a)
 		case notify.AlertKindH2HResult:
 			h2hResults = append(h2hResults, a)
 		case notify.AlertKindRankChange:
@@ -79,6 +82,9 @@ func FormatAlerts(alerts []notify.Alert) ([]string, error) {
 	header := fmt.Sprintf("<b>Gameweek %d Recap</b>", eventID)
 
 	var sections []string
+	if lines := formatAwards(awards); lines != "" {
+		sections = append(sections, lines)
+	}
 	if lines := formatH2HResults(h2hResults); lines != "" {
 		sections = append(sections, lines)
 	}
@@ -91,8 +97,10 @@ func FormatAlerts(alerts []notify.Alert) ([]string, error) {
 	if lines := formatChips(chips); lines != "" {
 		sections = append(sections, lines)
 	}
-	if lines := formatSummaries(summaries); lines != "" {
-		sections = append(sections, lines)
+	if len(awards) == 0 {
+		if lines := formatSummaries(summaries); lines != "" {
+			sections = append(sections, lines)
+		}
 	}
 
 	if len(sections) == 0 {
@@ -100,6 +108,118 @@ func FormatAlerts(alerts []notify.Alert) ([]string, error) {
 	}
 
 	return chunkMessages(header, sections), nil
+}
+
+func formatAwards(alerts []notify.Alert) string {
+	if len(alerts) == 0 {
+		return ""
+	}
+
+	a := alerts[0]
+	awards := a.GameweekAwards
+	if awards == nil {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("<b>Awards Ceremony</b>")
+
+	if awards.ManagerOfTheWeek != nil {
+		b.WriteString(fmt.Sprintf("\n🏆 Manager of the Week: <b>%s</b> (%d pts)",
+			esc(awards.ManagerOfTheWeek.Manager.Name), awards.ManagerOfTheWeek.Score))
+	}
+	if awards.WoodenSpoon != nil {
+		b.WriteString(fmt.Sprintf("\n💩 Wooden Spoon: <b>%s</b> took the spoon with %d pts",
+			esc(awards.WoodenSpoon.Manager.Name), awards.WoodenSpoon.Score))
+	}
+	if awards.CaptainGenius != nil {
+		b.WriteString(fmt.Sprintf("\n🎯 Captain Genius: <b>%s</b> backed %s for %d pts",
+			esc(awards.CaptainGenius.Manager.Name),
+			formatPlayer(awards.CaptainGenius.Captain),
+			awards.CaptainGenius.TotalPoints))
+	}
+	if awards.ArmbandOfShame != nil {
+		b.WriteString(fmt.Sprintf("\n🤡 Armband of Shame: <b>%s</b> trusted %s (%d pts) while %s hauled %d",
+			esc(awards.ArmbandOfShame.Manager.Name),
+			formatPlayer(awards.ArmbandOfShame.Captain),
+			awards.ArmbandOfShame.CaptainPoints,
+			formatPlayer(awards.ArmbandOfShame.ConsensusCaptain),
+			awards.ArmbandOfShame.ConsensusPoints))
+	}
+	if awards.BenchWarmer != nil {
+		b.WriteString(fmt.Sprintf("\n🪑 Bench Warmer: <b>%s</b> stranded %d pts on the bench",
+			esc(awards.BenchWarmer.Manager.Name), awards.BenchWarmer.PointsOnBench))
+	}
+	if awards.BiggestThrashing != nil {
+		b.WriteString(fmt.Sprintf("\n💀 Biggest Thrashing: <b>%s</b> steamrolled %s %d-%d",
+			esc(awards.BiggestThrashing.Winner.Name),
+			esc(awards.BiggestThrashing.Loser.Name),
+			awards.BiggestThrashing.WinnerScore,
+			awards.BiggestThrashing.LoserScore))
+	}
+	if awards.LuckiestWin != nil {
+		b.WriteString(fmt.Sprintf("\n🎰 Luckiest Win: <b>%s</b> snuck past %s %d-%d",
+			esc(awards.LuckiestWin.Winner.Name),
+			esc(awards.LuckiestWin.Loser.Name),
+			awards.LuckiestWin.WinnerScore,
+			awards.LuckiestWin.LoserScore))
+	}
+	if awards.UnluckiestLoss != nil {
+		b.WriteString(fmt.Sprintf("\n😤 Unluckiest Loss: <b>%s</b> lost %d-%d to %s and still beats everyone else this week",
+			esc(awards.UnluckiestLoss.Loser.Name),
+			awards.UnluckiestLoss.LoserScore,
+			awards.UnluckiestLoss.OpponentScore,
+			esc(awards.UnluckiestLoss.Opponent.Name)))
+	}
+	if awards.PlotTwist != nil {
+		u := awards.PlotTwist
+		b.WriteString(fmt.Sprintf("\nPlot twist: %s-place %s mugged %s-place %s (%d-%d)",
+			ordinal(u.WinnerPreviousRank), esc(u.Winner.Name),
+			ordinal(u.LoserPreviousRank), esc(u.Loser.Name),
+			u.WinnerScore, u.LoserScore))
+	}
+
+	return b.String()
+}
+
+func formatPlayer(player notify.PlayerRef) string {
+	if player.Name != "" {
+		return "<b>" + esc(player.Name) + "</b>"
+	}
+	if player.ElementID != 0 {
+		return fmt.Sprintf("player #%d", player.ElementID)
+	}
+	return "their captain"
+}
+
+func formatSummaries(alerts []notify.Alert) string {
+	if len(alerts) == 0 {
+		return ""
+	}
+
+	// There should only be one summary per gameweek, but handle gracefully.
+	a := alerts[0]
+	s := a.GameweekSummary
+	if s == nil {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("<b>Summary</b>")
+	b.WriteString(fmt.Sprintf("\nHighest scorer: <b>%s</b> (%d pts)",
+		esc(s.HighScorer.Manager.Name), s.HighScorer.Score))
+	b.WriteString(fmt.Sprintf("\nWooden spoon \xf0\x9f\xa5\x84 goes to %s (%d pts)",
+		esc(s.LowScorer.Manager.Name), s.LowScorer.Score))
+
+	if s.BiggestUpset != nil {
+		u := s.BiggestUpset
+		b.WriteString(fmt.Sprintf("\nBiggest upset: %s-place %s got absolutely mugged by %s-place %s (%d-%d)",
+			ordinal(u.LoserPreviousRank), esc(u.Loser.Name),
+			ordinal(u.WinnerPreviousRank), esc(u.Winner.Name),
+			u.WinnerScore, u.LoserScore))
+	}
+
+	return b.String()
 }
 
 // chunkMessages combines a header and sections into messages that each fit
@@ -315,36 +435,6 @@ func formatChips(alerts []notify.Alert) string {
 		}
 		b.WriteString(fmt.Sprintf("\n%s activated <b>%s</b>",
 			esc(c.Manager.Name), esc(chipDisplayName(c.Chip))))
-	}
-
-	return b.String()
-}
-
-func formatSummaries(alerts []notify.Alert) string {
-	if len(alerts) == 0 {
-		return ""
-	}
-
-	// There should only be one summary per gameweek, but handle gracefully.
-	a := alerts[0]
-	s := a.GameweekSummary
-	if s == nil {
-		return ""
-	}
-
-	var b strings.Builder
-	b.WriteString("<b>Summary</b>")
-	b.WriteString(fmt.Sprintf("\nHighest scorer: <b>%s</b> (%d pts)",
-		esc(s.HighScorer.Manager.Name), s.HighScorer.Score))
-	b.WriteString(fmt.Sprintf("\nWooden spoon \xf0\x9f\xa5\x84 goes to %s (%d pts)",
-		esc(s.LowScorer.Manager.Name), s.LowScorer.Score))
-
-	if s.BiggestUpset != nil {
-		u := s.BiggestUpset
-		b.WriteString(fmt.Sprintf("\nBiggest upset: %s-place %s got absolutely mugged by %s-place %s (%d-%d)",
-			ordinal(u.LoserPreviousRank), esc(u.Loser.Name),
-			ordinal(u.WinnerPreviousRank), esc(u.Winner.Name),
-			u.WinnerScore, u.LoserScore))
 	}
 
 	return b.String()

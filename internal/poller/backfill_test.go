@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/chrislonge/fpl-banter-bot/internal/fpl"
+	"github.com/chrislonge/fpl-banter-bot/internal/store"
 )
 
 // ---------------------------------------------------------------------------
@@ -49,15 +50,17 @@ func defaultStandings() fpl.H2HStandingsResponse {
 
 func TestBackfill(t *testing.T) {
 	tests := []struct {
-		name              string
-		cancelCtx         bool     // if true, cancel context before calling Backfill
-		setup             func(fc *fakeFPLClient, fs *fakeStore)
-		wantSnapshots     int      // expected number of SaveGameweekSnapshot calls
-		wantSavedEventIDs []int    // expected event IDs saved (in order)
-		wantMetaSource    string   // expected source on all metas
-		wantMetaFidelity  string   // expected standings_fidelity on all metas
-		wantErr           bool
-		wantErrMsg        string
+		name                 string
+		cancelCtx            bool // if true, cancel context before calling Backfill
+		setup                func(fc *fakeFPLClient, fs *fakeStore)
+		withCallback         bool
+		wantSnapshots        int   // expected number of SaveGameweekSnapshot calls
+		wantSavedEventIDs    []int // expected event IDs saved (in order)
+		wantCallbackEventIDs []int
+		wantMetaSource       string // expected source on all metas
+		wantMetaFidelity     string // expected standings_fidelity on all metas
+		wantErr              bool
+		wantErrMsg           string
 	}{
 		{
 			name: "no finished events",
@@ -133,7 +136,7 @@ func TestBackfill(t *testing.T) {
 				}
 				fs.storedEventIDs = []int{30}
 			},
-			wantSnapshots: 29,
+			wantSnapshots:    29,
 			wantMetaSource:   "backfill",
 			wantMetaFidelity: "synthetic",
 		},
@@ -177,7 +180,7 @@ func TestBackfill(t *testing.T) {
 			wantMetaFidelity:  "synthetic",
 		},
 		{
-			name: "does not fire callback",
+			name: "fires callback for missing snapshots when provided",
 			setup: func(fc *fakeFPLClient, fs *fakeStore) {
 				fc.bootstrap = fpl.BootstrapResponse{
 					Events: makeEvents([]int{1}, map[int]bool{1: true}),
@@ -189,10 +192,49 @@ func TestBackfill(t *testing.T) {
 				}
 				fs.storedEventIDs = []int{}
 			},
-			wantSnapshots:     1,
-			wantSavedEventIDs: []int{1},
-			wantMetaSource:    "backfill",
-			wantMetaFidelity:  "synthetic",
+			withCallback:         true,
+			wantSnapshots:        1,
+			wantSavedEventIDs:    []int{1},
+			wantCallbackEventIDs: []int{1},
+			wantMetaSource:       "backfill",
+			wantMetaFidelity:     "synthetic",
+		},
+		{
+			name: "enriches missing manager stats and recomputes awards",
+			setup: func(fc *fakeFPLClient, fs *fakeStore) {
+				fc.bootstrap = fpl.BootstrapResponse{
+					Events: makeEvents([]int{1}, map[int]bool{1: true}),
+				}
+				fc.standings = defaultStandings()
+				fc.histories = map[int]fpl.ManagerHistoryResponse{
+					100: {Chips: []fpl.ChipUsage{}},
+					200: {Chips: []fpl.ChipUsage{}},
+				}
+				fs.storedEventIDs = []int{1}
+				fs.storedManagerStatEventIDs = []int{}
+				fs.storedAwardEventIDs = []int{}
+				fs.snapshotMetas = []store.SnapshotMeta{
+					{LeagueID: 42, EventID: 1, Source: "live", StandingsFidelity: "historical"},
+				}
+			},
+			withCallback:         true,
+			wantSnapshots:        1,
+			wantSavedEventIDs:    []int{1},
+			wantCallbackEventIDs: []int{1},
+		},
+		{
+			name: "recomputes missing awards without rewriting snapshots",
+			setup: func(fc *fakeFPLClient, fs *fakeStore) {
+				fc.bootstrap = fpl.BootstrapResponse{
+					Events: makeEvents([]int{1, 2}, map[int]bool{1: true, 2: true}),
+				}
+				fs.storedEventIDs = []int{1, 2}
+				fs.storedManagerStatEventIDs = []int{1, 2}
+				fs.storedAwardEventIDs = []int{1}
+			},
+			withCallback:         true,
+			wantSnapshots:        0,
+			wantCallbackEventIDs: []int{2},
 		},
 		{
 			name:      "context cancellation",
@@ -266,11 +308,13 @@ func TestBackfill(t *testing.T) {
 
 			tt.setup(fc, fs)
 
-			// Track if callback was invoked (it should never be during backfill).
-			callbackCalled := false
-			onFinalized := func(_ context.Context, _ int) error {
-				callbackCalled = true
-				return nil
+			var callbackEventIDs []int
+			var onFinalized OnGameweekFinalized
+			if tt.withCallback {
+				onFinalized = func(_ context.Context, eventID int) error {
+					callbackEventIDs = append(callbackEventIDs, eventID)
+					return nil
+				}
 			}
 
 			p, err := New(fc, fs, defaultConfig(), onFinalized)
@@ -337,9 +381,13 @@ func TestBackfill(t *testing.T) {
 				}
 			}
 
-			// Callback should never be invoked during backfill.
-			if callbackCalled {
-				t.Error("onFinalized callback should not be called during backfill")
+			if len(callbackEventIDs) != len(tt.wantCallbackEventIDs) {
+				t.Fatalf("callback event IDs = %v, want %v", callbackEventIDs, tt.wantCallbackEventIDs)
+			}
+			for i, want := range tt.wantCallbackEventIDs {
+				if callbackEventIDs[i] != want {
+					t.Errorf("callbackEventIDs[%d] = %d, want %d", i, callbackEventIDs[i], want)
+				}
 			}
 		})
 	}
@@ -453,4 +501,3 @@ func TestRateLimitDelay(t *testing.T) {
 		}
 	})
 }
-

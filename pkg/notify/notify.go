@@ -12,6 +12,7 @@ import "context"
 type AlertKind string
 
 const (
+	AlertKindGameweekAwards  AlertKind = "gameweek_awards"
 	AlertKindRankChange      AlertKind = "rank_change"
 	AlertKindStreak          AlertKind = "streak"
 	AlertKindChipUsage       AlertKind = "chip_usage"
@@ -41,6 +42,12 @@ type ManagerScore struct {
 	Score   int
 }
 
+// PlayerRef carries the minimum player identity needed for rendering awards.
+type PlayerRef struct {
+	ElementID int
+	Name      string
+}
+
 // Alert is a structured event emitted by the stats engine.
 //
 // Exactly one detail payload should be populated based on Kind. Keeping the
@@ -54,6 +61,7 @@ type Alert struct {
 	RankChange      *RankChangeAlert
 	Streak          *StreakAlert
 	ChipUsage       *ChipUsageAlert
+	GameweekAwards  *GameweekAwardsAlert
 	GameweekSummary *GameweekSummaryAlert
 	H2HResult       *H2HResultAlert
 }
@@ -82,6 +90,49 @@ type ChipUsageAlert struct {
 	Chip    string
 }
 
+// CaptainAwardAlert reports a captain-based award.
+type CaptainAwardAlert struct {
+	Manager           ManagerRef
+	Captain           PlayerRef
+	CaptainPoints     int
+	CaptainMultiplier int
+	TotalPoints       int
+}
+
+// ArmbandOfShameAlert reports a captain miss against the league consensus.
+type ArmbandOfShameAlert struct {
+	Manager          ManagerRef
+	Captain          PlayerRef
+	CaptainPoints    int
+	ConsensusCaptain PlayerRef
+	ConsensusPoints  int
+}
+
+// BenchWarmerAwardAlert reports the most points stranded on the bench.
+type BenchWarmerAwardAlert struct {
+	Manager       ManagerRef
+	PointsOnBench int
+}
+
+// MatchupAwardAlert reports a matchup-based award with winner/loser context.
+type MatchupAwardAlert struct {
+	Winner      ManagerRef
+	WinnerScore int
+	Loser       ManagerRef
+	LoserScore  int
+	Margin      int
+}
+
+// UnluckiestLossAlert reports a strong losing score that ran into one
+// exceptional opponent.
+type UnluckiestLossAlert struct {
+	Loser         ManagerRef
+	LoserScore    int
+	Opponent      ManagerRef
+	OpponentScore int
+	Margin        int
+}
+
 // UpsetAlert reports a lower-ranked manager beating a higher-ranked one.
 type UpsetAlert struct {
 	Winner             ManagerRef
@@ -93,7 +144,22 @@ type UpsetAlert struct {
 	RankGap            int
 }
 
+// GameweekAwardsAlert reports the headline awards for a gameweek.
+type GameweekAwardsAlert struct {
+	ManagerOfTheWeek *ManagerScore
+	WoodenSpoon      *ManagerScore
+	CaptainGenius    *CaptainAwardAlert
+	ArmbandOfShame   *ArmbandOfShameAlert
+	BenchWarmer      *BenchWarmerAwardAlert
+	BiggestThrashing *MatchupAwardAlert
+	LuckiestWin      *MatchupAwardAlert
+	UnluckiestLoss   *UnluckiestLossAlert
+	PlotTwist        *UpsetAlert
+}
+
 // GameweekSummaryAlert reports the top-level summary for a gameweek.
+// Deprecated: keep emitting this in v2 for compatibility while notifiers
+// migrate to the richer GameweekAwardsAlert payload.
 type GameweekSummaryAlert struct {
 	HighScorer   ManagerScore
 	LowScorer    ManagerScore

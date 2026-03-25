@@ -63,6 +63,7 @@ func TestGetBootstrap(t *testing.T) {
 		wantErr    bool   // Do we expect an error?
 		wantEvents int    // Expected number of events (only checked if no error)
 		wantTeams  int    // Expected number of teams (only checked if no error)
+		wantPlayers int   // Expected number of players (only checked if no error)
 	}{
 		{
 			name:       "valid response with events and teams",
@@ -74,11 +75,15 @@ func TestGetBootstrap(t *testing.T) {
 				],
 				"teams": [
 					{"id": 1, "name": "Arsenal", "short_name": "ARS"}
+				],
+				"elements": [
+					{"id": 430, "web_name": "Haaland"}
 				]
 			}`,
 			wantErr:    false,
 			wantEvents: 2,
 			wantTeams:  1,
+			wantPlayers: 1,
 		},
 		{
 			name:       "server error returns error",
@@ -134,6 +139,9 @@ func TestGetBootstrap(t *testing.T) {
 			if got := len(resp.Teams); got != tt.wantTeams {
 				t.Errorf("teams count = %d, want %d", got, tt.wantTeams)
 			}
+			if got := len(resp.Elements); got != tt.wantPlayers {
+				t.Errorf("elements count = %d, want %d", got, tt.wantPlayers)
+			}
 		})
 	}
 }
@@ -163,6 +171,10 @@ func TestGetBootstrapFieldMapping(t *testing.T) {
 			"code": 3,
 			"strength": 5,
 			"position": 1
+		}],
+		"elements": [{
+			"id": 430,
+			"web_name": "Haaland"
 		}]
 	}`
 
@@ -221,6 +233,13 @@ func TestGetBootstrapFieldMapping(t *testing.T) {
 	}
 	if tm.ShortName != "ARS" {
 		t.Errorf("Team.ShortName = %q, want %q", tm.ShortName, "ARS")
+	}
+	player := resp.Elements[0]
+	if player.ID != 430 {
+		t.Errorf("Element.ID = %d, want 430", player.ID)
+	}
+	if player.WebName != "Haaland" {
+		t.Errorf("Element.WebName = %q, want %q", player.WebName, "Haaland")
 	}
 }
 
@@ -930,6 +949,83 @@ func TestGetManagerPicksURLPath(t *testing.T) {
 	}
 }
 
+func TestGetEventLive(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		body       string
+		wantErr    bool
+		wantCount  int
+	}{
+		{
+			name:       "valid response with element points",
+			statusCode: http.StatusOK,
+			body: `{
+				"elements": [
+					{"id": 430, "stats": {"total_points": 13}},
+					{"id": 328, "stats": {"total_points": 2}}
+				]
+			}`,
+			wantCount: 2,
+		},
+		{
+			name:       "server error",
+			statusCode: http.StatusInternalServerError,
+			body:       `{}`,
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.statusCode)
+				w.Write([]byte(tt.body))
+			}))
+			defer srv.Close()
+
+			client := fpl.NewClient(srv.URL, srv.Client())
+			resp, err := client.GetEventLive(context.Background(), 5)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := len(resp.Elements); got != tt.wantCount {
+				t.Fatalf("len(elements) = %d, want %d", got, tt.wantCount)
+			}
+			if resp.Elements[0].ID != 430 {
+				t.Errorf("Elements[0].ID = %d, want 430", resp.Elements[0].ID)
+			}
+			if resp.Elements[0].Stats.TotalPoints == nil || *resp.Elements[0].Stats.TotalPoints != 13 {
+				t.Errorf("Elements[0].Stats.TotalPoints = %v, want 13", resp.Elements[0].Stats.TotalPoints)
+			}
+		})
+	}
+}
+
+func TestGetEventLiveURLPath(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"elements":[]}`))
+	}))
+	defer srv.Close()
+
+	client := fpl.NewClient(srv.URL, srv.Client())
+	_, _ = client.GetEventLive(context.Background(), 7)
+
+	if gotPath != "/event/7/live/" {
+		t.Errorf("URL path = %q, want %q", gotPath, "/event/7/live/")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // TestContextCancellation
 // ---------------------------------------------------------------------------
@@ -958,6 +1054,9 @@ func TestContextCancellation(t *testing.T) {
 	}
 	if _, err := client.GetEventStatus(ctx); err == nil {
 		t.Error("GetEventStatus: expected error from cancelled context, got nil")
+	}
+	if _, err := client.GetEventLive(ctx, 1); err == nil {
+		t.Error("GetEventLive: expected error from cancelled context, got nil")
 	}
 	if _, err := client.GetH2HStandings(ctx, 1, 1); err == nil {
 		t.Error("GetH2HStandings: expected error from cancelled context, got nil")

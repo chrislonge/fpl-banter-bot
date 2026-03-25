@@ -43,17 +43,21 @@ var _ FPLClient = (*fpl.Client)(nil)
 
 // fakeFPLClient implements FPLClient for testing.
 type fakeFPLClient struct {
-	bootstrap      fpl.BootstrapResponse
-	bootstrapErr   error
-	eventStatus    fpl.EventStatusResponse
-	eventStatusErr error
-	standings      fpl.H2HStandingsResponse
-	standingsErr   error
-	matches        fpl.H2HMatchesResponse
-	matchesByEvent map[int]fpl.H2HMatchesResponse
-	matchesErr     error
-	histories      map[int]fpl.ManagerHistoryResponse
-	historyErr     error
+	bootstrap           fpl.BootstrapResponse
+	bootstrapErr        error
+	eventStatus         fpl.EventStatusResponse
+	eventStatusErr      error
+	liveByEvent         map[int]fpl.EventLiveResponse
+	liveErr             error
+	standings           fpl.H2HStandingsResponse
+	standingsErr        error
+	matches             fpl.H2HMatchesResponse
+	matchesByEvent      map[int]fpl.H2HMatchesResponse
+	matchesErr          error
+	histories           map[int]fpl.ManagerHistoryResponse
+	historyErr          error
+	picksByManagerEvent map[int]map[int]fpl.ManagerPicksResponse
+	picksErr            error
 }
 
 func (f *fakeFPLClient) GetBootstrap(_ context.Context) (fpl.BootstrapResponse, error) {
@@ -62,6 +66,21 @@ func (f *fakeFPLClient) GetBootstrap(_ context.Context) (fpl.BootstrapResponse, 
 
 func (f *fakeFPLClient) GetEventStatus(_ context.Context) (fpl.EventStatusResponse, error) {
 	return f.eventStatus, f.eventStatusErr
+}
+
+func (f *fakeFPLClient) GetEventLive(_ context.Context, eventID int) (fpl.EventLiveResponse, error) {
+	if f.liveErr != nil {
+		return fpl.EventLiveResponse{}, f.liveErr
+	}
+	if resp, ok := f.liveByEvent[eventID]; ok {
+		return resp, nil
+	}
+	return fpl.EventLiveResponse{
+		Elements: []fpl.LiveElement{
+			{ID: 1, Stats: fpl.LiveElementStats{TotalPoints: intPtr(10)}},
+			{ID: 2, Stats: fpl.LiveElementStats{TotalPoints: intPtr(2)}},
+		},
+	}, nil
 }
 
 func (f *fakeFPLClient) GetAllH2HStandings(_ context.Context, _ int) (fpl.H2HStandingsResponse, error) {
@@ -101,9 +120,29 @@ func (f *fakeFPLClient) GetManagerHistory(_ context.Context, managerID int) (fpl
 		return fpl.ManagerHistoryResponse{}, f.historyErr
 	}
 	if resp, ok := f.histories[managerID]; ok {
+		if len(resp.Current) == 0 {
+			resp.Current = defaultCurrentHistories(f.bootstrap.Events)
+		}
 		return resp, nil
 	}
-	return fpl.ManagerHistoryResponse{}, nil
+	return fpl.ManagerHistoryResponse{Current: defaultCurrentHistories(f.bootstrap.Events)}, nil
+}
+
+func (f *fakeFPLClient) GetManagerPicks(_ context.Context, managerID int, eventID int) (fpl.ManagerPicksResponse, error) {
+	if f.picksErr != nil {
+		return fpl.ManagerPicksResponse{}, f.picksErr
+	}
+	if byEvent, ok := f.picksByManagerEvent[managerID]; ok {
+		if resp, ok := byEvent[eventID]; ok {
+			return resp, nil
+		}
+	}
+	return fpl.ManagerPicksResponse{
+		Picks: []fpl.Pick{
+			{Element: 1, Position: 1, Multiplier: 2, IsCaptain: true},
+			{Element: 2, Position: 2, Multiplier: 1, IsViceCaptain: true},
+		},
+	}, nil
 }
 
 // fakeStore implements store.Store for testing.
@@ -122,13 +161,16 @@ type fakeStore struct {
 	lastStandings    []store.GameweekStanding
 	lastChips        []store.ChipUsage
 	lastResults      []store.H2HResult
+	lastManagerStats []store.GameweekManagerStat
 	snapshotErr      error
 
 	// Backfill-related fields
-	storedEventIDs   []int
-	storedEventIDErr error
-	savedEventIDs    []int
-	snapshotMetas    []store.SnapshotMeta
+	storedEventIDs            []int
+	storedManagerStatEventIDs []int
+	storedAwardEventIDs       []int
+	storedEventIDErr          error
+	savedEventIDs             []int
+	snapshotMetas             []store.SnapshotMeta
 }
 
 func (f *fakeStore) GetLatestEventID(_ context.Context, _ int64) (int, error) {
@@ -145,14 +187,15 @@ func (f *fakeStore) UpsertManager(_ context.Context, manager store.Manager) erro
 	return nil
 }
 
-func (f *fakeStore) SaveGameweekSnapshot(_ context.Context, standings []store.GameweekStanding, chips []store.ChipUsage, results []store.H2HResult, meta store.SnapshotMeta) error {
+func (f *fakeStore) SaveGameweekSnapshot(_ context.Context, snap store.GameweekSnapshot) error {
 	f.snapshotCalls++
-	f.lastStandings = standings
-	f.lastChips = chips
-	f.lastResults = results
-	f.snapshotMetas = append(f.snapshotMetas, meta)
-	if len(standings) > 0 {
-		f.savedEventIDs = append(f.savedEventIDs, standings[0].EventID)
+	f.lastStandings = snap.Standings
+	f.lastChips = snap.Chips
+	f.lastResults = snap.Results
+	f.lastManagerStats = snap.ManagerStats
+	f.snapshotMetas = append(f.snapshotMetas, snap.Meta)
+	if snap.Meta.EventID != 0 {
+		f.savedEventIDs = append(f.savedEventIDs, snap.Meta.EventID)
 	}
 	return f.snapshotErr
 }
@@ -161,13 +204,32 @@ func (f *fakeStore) GetStoredEventIDs(_ context.Context, _ int64) ([]int, error)
 	return f.storedEventIDs, f.storedEventIDErr
 }
 
+func (f *fakeStore) GetStoredManagerStatEventIDs(_ context.Context, _ int64) ([]int, error) {
+	if f.storedManagerStatEventIDs == nil {
+		return f.storedEventIDs, f.storedEventIDErr
+	}
+	return f.storedManagerStatEventIDs, f.storedEventIDErr
+}
+
+func (f *fakeStore) GetStoredAwardEventIDs(_ context.Context, _ int64) ([]int, error) {
+	if f.storedAwardEventIDs == nil {
+		return f.storedEventIDs, f.storedEventIDErr
+	}
+	return f.storedAwardEventIDs, f.storedEventIDErr
+}
+
 func (f *fakeStore) UpsertSnapshotMeta(_ context.Context, meta store.SnapshotMeta) error {
 	f.snapshotMetas = append(f.snapshotMetas, meta)
 	return nil
 }
 
-func (f *fakeStore) GetSnapshotMeta(_ context.Context, _ int64, _ int) (store.SnapshotMeta, error) {
-	panic("not implemented")
+func (f *fakeStore) GetSnapshotMeta(_ context.Context, _ int64, eventID int) (store.SnapshotMeta, error) {
+	for _, meta := range f.snapshotMetas {
+		if meta.EventID == eventID {
+			return meta, nil
+		}
+	}
+	return store.SnapshotMeta{}, store.ErrNotFound
 }
 
 // Methods the poller doesn't call — panic to catch unexpected usage.
@@ -180,6 +242,15 @@ func (f *fakeStore) UpsertChipUsage(context.Context, store.ChipUsage) error {
 func (f *fakeStore) UpsertH2HResult(context.Context, store.H2HResult) error {
 	panic("not implemented")
 }
+func (f *fakeStore) UpsertGameweekManagerStat(context.Context, store.GameweekManagerStat) error {
+	panic("not implemented")
+}
+func (f *fakeStore) UpsertGameweekAward(context.Context, store.GameweekAward) error {
+	panic("not implemented")
+}
+func (f *fakeStore) SaveGameweekAwards(context.Context, int64, int, []store.GameweekAward) error {
+	panic("not implemented")
+}
 func (f *fakeStore) GetStandings(context.Context, int64, int) ([]store.GameweekStanding, error) {
 	panic("not implemented")
 }
@@ -190,6 +261,12 @@ func (f *fakeStore) GetH2HResults(context.Context, int64, int) ([]store.H2HResul
 	panic("not implemented")
 }
 func (f *fakeStore) GetH2HResultsRange(context.Context, int64, int, int) ([]store.H2HResult, error) {
+	panic("not implemented")
+}
+func (f *fakeStore) GetGameweekManagerStats(context.Context, int64, int) ([]store.GameweekManagerStat, error) {
+	panic("not implemented")
+}
+func (f *fakeStore) GetGameweekAwards(context.Context, int64, int) ([]store.GameweekAward, error) {
 	panic("not implemented")
 }
 func (f *fakeStore) GetManagers(context.Context, int64) ([]store.Manager, error) {
@@ -234,6 +311,24 @@ func newTestPoller(fc *fakeFPLClient, fs *fakeStore, onFinalized OnGameweekFinal
 	// Zero out rate limit so backfill tests run instantly.
 	p.rateLimitDelay = 0
 	return p
+}
+
+func defaultCurrentHistories(events []fpl.Event) []fpl.GameweekHistory {
+	var current []fpl.GameweekHistory
+	for _, event := range events {
+		if !event.Finished {
+			continue
+		}
+		current = append(current, fpl.GameweekHistory{
+			Event:         event.ID,
+			PointsOnBench: 0,
+		})
+	}
+	return current
+}
+
+func intPtr(v int) *int {
+	return &v
 }
 
 // ---------------------------------------------------------------------------

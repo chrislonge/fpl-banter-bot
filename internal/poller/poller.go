@@ -66,9 +66,11 @@ const (
 type FPLClient interface {
 	GetBootstrap(ctx context.Context) (fpl.BootstrapResponse, error)
 	GetEventStatus(ctx context.Context) (fpl.EventStatusResponse, error)
+	GetEventLive(ctx context.Context, eventID int) (fpl.EventLiveResponse, error)
 	GetAllH2HStandings(ctx context.Context, leagueID int) (fpl.H2HStandingsResponse, error)
 	GetAllH2HMatches(ctx context.Context, leagueID int, eventID int) (fpl.H2HMatchesResponse, error)
 	GetManagerHistory(ctx context.Context, managerID int) (fpl.ManagerHistoryResponse, error)
+	GetManagerPicks(ctx context.Context, managerID int, eventID int) (fpl.ManagerPicksResponse, error)
 }
 
 // OnGameweekFinalized is called after a gameweek's data is persisted.
@@ -422,11 +424,12 @@ func (p *Poller) findRelevantEvent() *fpl.Event {
 //  2. Upsert league (FK prerequisite)
 //  3. Upsert managers (FK prerequisite)
 //  4. Fetch manager histories
-//  5. Map standings to store types
-//  6. Fetch H2H matches
-//  7. Map H2H results to store types
-//  8. Save snapshot (atomic transaction)
-//  9. Fire callback (if set)
+//  5. Fetch per-player live points and manager picks to derive manager stats
+//  6. Map standings to store types
+//  7. Fetch H2H matches
+//  8. Map H2H results to store types
+//  9. Save snapshot (atomic transaction)
+// 10. Fire callback (if set)
 //
 // If ANY step fails — including the callback — the entire finalization is
 // considered failed. The poller does NOT advance lastProcessedEvent, so
@@ -460,39 +463,51 @@ func (p *Poller) finalize(ctx context.Context, eventID int) error {
 		}
 	}
 
-	// Step 4: Fetch manager histories and collect chip usages.
-	// Each manager's history endpoint returns ALL chips across ALL gameweeks,
-	// so mapChipUsages filters to only this eventID.
-	var allChips []store.ChipUsage
-	for _, entry := range standingsResp.Standings.Results {
-		history, err := p.fpl.GetManagerHistory(ctx, entry.EntryID)
-		if err != nil {
-			return fmt.Errorf("fetching history for manager %d: %w", entry.EntryID, err)
-		}
-
-		chips := mapChipUsages(leagueID, eventID, int64(entry.EntryID), history.Chips)
-		allChips = append(allChips, chips...)
+	// Step 4: Fetch manager histories once, then derive chips and bench data
+	// for this event from the cached season responses.
+	histories, err := p.fetchManagerHistories(ctx, standingsResp.Standings.Results)
+	if err != nil {
+		return err
+	}
+	allChips, err := chipsForEvent(leagueID, eventID, standingsResp.Standings.Results, histories)
+	if err != nil {
+		return err
 	}
 
-	// Step 5: Map standings to store types.
+	// Step 5: Fetch event live data and manager picks to derive awards facts.
+	managerStats, err := p.buildManagerStatsForEvent(ctx, leagueID, eventID, standingsResp.Standings.Results, histories)
+	if err != nil {
+		return err
+	}
+
+	// Step 6: Map standings to store types.
 	standings := mapStandings(leagueID, eventID, standingsResp.Standings.Results)
 
-	// Step 6: Fetch the actual H2H fixtures for this event.
+	// Step 7: Fetch the actual H2H fixtures for this event.
+	if err := rateLimitDelay(ctx, p.rateLimitDelay); err != nil {
+		return err
+	}
 	matchesResp, err := p.fpl.GetAllH2HMatches(ctx, p.cfg.LeagueID, eventID)
 	if err != nil {
 		return fmt.Errorf("fetching h2h matches: %w", err)
 	}
-	// Step 7: Map H2H fixtures to store types.
+	// Step 8: Map H2H fixtures to store types.
 	results := mapH2HResults(leagueID, eventID, matchesResp.Results)
 
-	// Step 8: Save the snapshot atomically (standings + chips + results + meta).
-	meta := store.SnapshotMeta{
-		LeagueID:          leagueID,
-		EventID:           eventID,
-		Source:            "live",
-		StandingsFidelity: "historical",
+	// Step 9: Save the snapshot atomically.
+	snap := store.GameweekSnapshot{
+		Standings:    standings,
+		Chips:        allChips,
+		Results:      results,
+		ManagerStats: managerStats,
+		Meta: store.SnapshotMeta{
+			LeagueID:          leagueID,
+			EventID:           eventID,
+			Source:            "live",
+			StandingsFidelity: "historical",
+		},
 	}
-	if err := p.store.SaveGameweekSnapshot(ctx, standings, allChips, results, meta); err != nil {
+	if err := p.store.SaveGameweekSnapshot(ctx, snap); err != nil {
 		return fmt.Errorf("saving snapshot: %w", err)
 	}
 
@@ -501,9 +516,10 @@ func (p *Poller) finalize(ctx context.Context, eventID int) error {
 		"managers", len(standings),
 		"chips", len(allChips),
 		"h2h_results", len(results),
+		"manager_stats", len(managerStats),
 	)
 
-	// Step 9: Fire the callback (if set).
+	// Step 10: Fire the callback (if set).
 	if p.onFinalized != nil {
 		if err := p.onFinalized(ctx, eventID); err != nil {
 			return fmt.Errorf("onFinalized callback: %w", err)

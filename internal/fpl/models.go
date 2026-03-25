@@ -37,26 +37,28 @@ package fpl
 // ---------------------------------------------------------------------------
 
 // BootstrapResponse is the top-level response from /bootstrap-static/.
-// We only extract the events (gameweeks) and teams arrays.
+// We only extract the events (gameweeks), teams, and minimal player
+// identity fields needed for current-season display.
 type BootstrapResponse struct {
-	Events []Event `json:"events"`
-	Teams  []Team  `json:"teams"`
+	Events   []Event   `json:"events"`
+	Teams    []Team    `json:"teams"`
+	Elements []Element `json:"elements"`
 }
 
 // Event represents a single gameweek in the FPL season.
 type Event struct {
-	ID           int        `json:"id"`                  // Gameweek number (1–38)
-	Name         string     `json:"name"`                // e.g., "Gameweek 1"
-	DeadlineTime string     `json:"deadline_time"`       // ISO 8601 timestamp
-	Finished     bool       `json:"finished"`            // All fixtures in this GW are done
-	DataChecked  bool       `json:"data_checked"`        // FPL has validated the data
-	IsPrevious   bool       `json:"is_previous"`         // This is the most recently completed GW
-	IsCurrent    bool       `json:"is_current"`          // This GW is currently in progress
-	IsNext       bool       `json:"is_next"`             // This is the upcoming GW
-	AverageScore int        `json:"average_entry_score"` // Mean score across all FPL managers
-	HighestScore int        `json:"highest_score"`       // Highest individual GW score
-	MostCaptained int       `json:"most_captained"`      // Player ID most often captained
-	ChipPlays    []ChipPlay `json:"chip_plays"`          // Aggregate chip usage stats
+	ID            int        `json:"id"`                  // Gameweek number (1–38)
+	Name          string     `json:"name"`                // e.g., "Gameweek 1"
+	DeadlineTime  string     `json:"deadline_time"`       // ISO 8601 timestamp
+	Finished      bool       `json:"finished"`            // All fixtures in this GW are done
+	DataChecked   bool       `json:"data_checked"`        // FPL has validated the data
+	IsPrevious    bool       `json:"is_previous"`         // This is the most recently completed GW
+	IsCurrent     bool       `json:"is_current"`          // This GW is currently in progress
+	IsNext        bool       `json:"is_next"`             // This is the upcoming GW
+	AverageScore  int        `json:"average_entry_score"` // Mean score across all FPL managers
+	HighestScore  int        `json:"highest_score"`       // Highest individual GW score
+	MostCaptained int        `json:"most_captained"`      // Player ID most often captained
+	ChipPlays     []ChipPlay `json:"chip_plays"`          // Aggregate chip usage stats
 }
 
 // ChipPlay records how many managers used a particular chip in a gameweek.
@@ -73,6 +75,12 @@ type Team struct {
 	Code      int    `json:"code"`       // Internal FPL code
 	Strength  int    `json:"strength"`   // Overall strength rating
 	Position  int    `json:"position"`   // Current Premier League position
+}
+
+// Element carries the minimal player identity we need for awards copy.
+type Element struct {
+	ID      int    `json:"id"`
+	WebName string `json:"web_name"`
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +104,30 @@ type EventStatus struct {
 	Date       string `json:"date"`        // ISO date (YYYY-MM-DD)
 	Event      int    `json:"event"`       // Gameweek number this status refers to
 	Points     string `json:"points"`      // Processing status (e.g., "r" = raw/recalculated)
+}
+
+// ---------------------------------------------------------------------------
+// Event Live (GET /event/{id}/live/)
+// ---------------------------------------------------------------------------
+//
+// This endpoint contains per-player live/finalized points for a gameweek.
+// We only decode the element ID and total points needed to score captains.
+// ---------------------------------------------------------------------------
+
+// EventLiveResponse is the top-level response from /event/{id}/live/.
+type EventLiveResponse struct {
+	Elements []LiveElement `json:"elements"`
+}
+
+// LiveElement represents one player's live stats for a gameweek.
+type LiveElement struct {
+	ID    int              `json:"id"`
+	Stats LiveElementStats `json:"stats"`
+}
+
+// LiveElementStats contains the subset of live stats we need.
+type LiveElementStats struct {
+	TotalPoints *int `json:"total_points"`
 }
 
 // ---------------------------------------------------------------------------
@@ -182,13 +214,13 @@ type Standings struct {
 
 // StandingEntry represents one manager's row in the H2H league table.
 type StandingEntry struct {
-	ID            int    `json:"id"`              // Standing row ID (FPL internal)
-	EntryID       int    `json:"entry"`           // Manager's entry/team ID
-	PlayerName    string `json:"player_name"`     // Manager's real name
-	EntryName     string `json:"entry_name"`      // Fantasy team name
-	Rank          int    `json:"rank"`            // Current league rank
-	LastRank      int    `json:"last_rank"`       // Rank after previous gameweek
-	Total         int    `json:"total"`           // H2H points (W=3, D=1, L=0)
+	ID            int    `json:"id"`          // Standing row ID (FPL internal)
+	EntryID       int    `json:"entry"`       // Manager's entry/team ID
+	PlayerName    string `json:"player_name"` // Manager's real name
+	EntryName     string `json:"entry_name"`  // Fantasy team name
+	Rank          int    `json:"rank"`        // Current league rank
+	LastRank      int    `json:"last_rank"`   // Rank after previous gameweek
+	Total         int    `json:"total"`       // H2H points (W=3, D=1, L=0)
 	MatchesPlayed int    `json:"matches_played"`
 	MatchesWon    int    `json:"matches_won"`
 	MatchesDrawn  int    `json:"matches_drawn"`
@@ -262,9 +294,9 @@ type ManagerPicksResponse struct {
 
 // Pick represents a single player selection in a manager's team.
 type Pick struct {
-	Element       int  `json:"element"`         // Player ID
-	Position      int  `json:"position"`        // Squad slot (1–15)
-	Multiplier    int  `json:"multiplier"`      // 1 = normal, 2 = captain, 3 = triple captain
+	Element       int  `json:"element"`    // Player ID
+	Position      int  `json:"position"`   // Squad slot (1–15)
+	Multiplier    int  `json:"multiplier"` // 0 = inactive captain, 1 = normal, 2 = captain, 3 = triple captain
 	IsCaptain     bool `json:"is_captain"`
 	IsViceCaptain bool `json:"is_vice_captain"`
 }

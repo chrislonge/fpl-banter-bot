@@ -78,6 +78,37 @@ const upsertSnapshotMeta = `
 		standings_fidelity = EXCLUDED.standings_fidelity
 `
 
+const upsertGameweekManagerStat = `
+	INSERT INTO gameweek_manager_stats (
+		league_id, event_id, manager_id, points_on_bench,
+		captain_element_id, captain_points, captain_multiplier
+	)
+	VALUES ($1, $2, $3, $4, $5, $6, $7)
+	ON CONFLICT (league_id, event_id, manager_id) DO UPDATE SET
+		points_on_bench   = EXCLUDED.points_on_bench,
+		captain_element_id = EXCLUDED.captain_element_id,
+		captain_points     = EXCLUDED.captain_points,
+		captain_multiplier = EXCLUDED.captain_multiplier
+`
+
+const upsertGameweekAward = `
+	INSERT INTO gw_awards (
+		league_id, event_id, award_key, manager_id,
+		opponent_manager_id, player_element_id, metric_value
+	)
+	VALUES ($1, $2, $3, $4, $5, $6, $7)
+	ON CONFLICT (league_id, event_id, award_key) DO UPDATE SET
+		manager_id           = EXCLUDED.manager_id,
+		opponent_manager_id  = EXCLUDED.opponent_manager_id,
+		player_element_id    = EXCLUDED.player_element_id,
+		metric_value         = EXCLUDED.metric_value
+`
+
+const deleteGameweekAwardsForEvent = `
+	DELETE FROM gw_awards
+	WHERE league_id = $1 AND event_id = $2
+`
+
 // ---------------------------------------------------------------------------
 // Read queries
 // ---------------------------------------------------------------------------
@@ -134,6 +165,38 @@ const getSnapshotMeta = `
 	SELECT league_id, event_id, source, standings_fidelity, created_at
 	FROM gameweek_snapshot_meta
 	WHERE league_id = $1 AND event_id = $2
+`
+
+const getGameweekManagerStats = `
+	SELECT
+		league_id, event_id, manager_id, points_on_bench,
+		captain_element_id, captain_points, captain_multiplier, created_at
+	FROM gameweek_manager_stats
+	WHERE league_id = $1 AND event_id = $2
+	ORDER BY manager_id
+`
+
+const getGameweekAwards = `
+	SELECT
+		league_id, event_id, award_key, manager_id,
+		opponent_manager_id, player_element_id, metric_value, created_at
+	FROM gw_awards
+	WHERE league_id = $1 AND event_id = $2
+	ORDER BY award_key
+`
+
+const getStoredManagerStatEventIDs = `
+	SELECT DISTINCT event_id
+	FROM gameweek_manager_stats
+	WHERE league_id = $1
+	ORDER BY event_id
+`
+
+const getStoredAwardEventIDs = `
+	SELECT DISTINCT event_id
+	FROM gw_awards
+	WHERE league_id = $1
+	ORDER BY event_id
 `
 
 // getLatestEventID returns the highest gameweek number stored for a league.
