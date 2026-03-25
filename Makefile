@@ -37,9 +37,10 @@ run:
 backfill:
 	go run cmd/backfill/main.go
 
-## Backfill via Docker Compose (used on Pi or any Docker deployment)
+## Backfill via Docker Compose (used on Pi or any Docker deployment).
+## `--build` keeps the one-shot tool image in sync with the latest code.
 docker-backfill:
-	docker compose run --rm backfill
+	docker compose run --rm --build backfill
 
 ## Build and start the full stack (db + bot) in detached mode
 deploy:
