@@ -110,7 +110,7 @@ func TestGetBootstrap(t *testing.T) {
 			// httptest.NewServer starts a real HTTP server on localhost.
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tt.statusCode)
-				w.Write([]byte(tt.body))
+				_, _ = w.Write([]byte(tt.body))
 			}))
 			// Always close the server when the subtest finishes.
 			defer srv.Close()

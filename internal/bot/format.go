@@ -36,9 +36,9 @@ func formatStandings(eventID int, standings []store.GameweekStanding, managers [
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("<b>Standings after GW%d</b>\n", eventID))
+	_, _ = fmt.Fprintf(&b, "<b>Standings after GW%d</b>\n", eventID)
 	b.WriteString("<pre>")
-	b.WriteString(fmt.Sprintf("%-4s %-18s %4s %5s\n", "Pos", "Manager", "Pts", "Score"))
+	_, _ = fmt.Fprintf(&b, "%-4s %-18s %4s %5s\n", "Pos", "Manager", "Pts", "Score")
 	b.WriteString(strings.Repeat("-", 33))
 
 	for _, s := range standings {
@@ -63,8 +63,8 @@ func formatStandings(eventID int, standings []store.GameweekStanding, managers [
 		padding := managerColWidth - displayWidth
 		escapedName := esc(name)
 
-		b.WriteString(fmt.Sprintf("\n%-4s %s%s %4d %5d",
-			ordinal(s.Rank), escapedName, strings.Repeat(" ", padding), s.Points, s.TotalScore))
+		_, _ = fmt.Fprintf(&b, "\n%-4s %s%s %4d %5d",
+			ordinal(s.Rank), escapedName, strings.Repeat(" ", padding), s.Points, s.TotalScore)
 	}
 
 	b.WriteString("</pre>")

@@ -254,7 +254,7 @@ func (h *Handler) RunServer(ctx context.Context) error {
 func (h *Handler) serveHealth(w http.ResponseWriter, _ *http.Request) {
 	state, lastEvent := h.poller.Status()
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"status":"ok","poller_state":%q,"last_processed_event":%d}`,
+	_, _ = fmt.Fprintf(w, `{"status":"ok","poller_state":%q,"last_processed_event":%d}`,
 		state, lastEvent)
 }
 

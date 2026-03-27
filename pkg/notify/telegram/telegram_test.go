@@ -46,7 +46,7 @@ func testServer(t *testing.T, statusCode int, body string) (*httptest.Server, *[
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(statusCode)
-		w.Write([]byte(body))
+		_, _ = w.Write([]byte(body))
 	}))
 
 	t.Cleanup(server.Close)
@@ -87,7 +87,7 @@ func rawTestServer(t *testing.T, statusCode int, body string) (*httptest.Server,
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(statusCode)
-		w.Write([]byte(body))
+		_, _ = w.Write([]byte(body))
 	}))
 
 	t.Cleanup(server.Close)
