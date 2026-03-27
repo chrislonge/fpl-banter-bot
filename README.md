@@ -1,5 +1,7 @@
 # fpl-banter-bot
 
+[![CI](https://github.com/chrislonge/fpl-banter-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/chrislonge/fpl-banter-bot/actions/workflows/ci.yml)
+
 A self-hosted Fantasy Premier League banter bot for head-to-head mini-leagues. It watches the FPL API, stores finished gameweeks in Postgres, posts an awards-first recap to Telegram, and answers a small set of league commands on demand.
 
 ## What the bot does
@@ -206,6 +208,8 @@ pkg/notify/telegram/ Telegram formatter and delivery client
 ```
 
 ## Development and verification
+
+PRs to `main` run lint (`golangci-lint`, `go vet`) and the full test suite automatically, including store integration tests against a real Postgres instance. Both jobs must pass before merging.
 
 Common commands:
 

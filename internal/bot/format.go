@@ -36,9 +36,9 @@ func formatStandings(eventID int, standings []store.GameweekStanding, managers [
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("<b>Standings after GW%d</b>\n", eventID))
+	_, _ = fmt.Fprintf(&b, "<b>Standings after GW%d</b>\n", eventID)
 	b.WriteString("<pre>")
-	b.WriteString(fmt.Sprintf("%-4s %-18s %4s %5s\n", "Pos", "Manager", "Pts", "Score"))
+	_, _ = fmt.Fprintf(&b, "%-4s %-18s %4s %5s\n", "Pos", "Manager", "Pts", "Score")
 	b.WriteString(strings.Repeat("-", 33))
 
 	for _, s := range standings {
@@ -63,8 +63,8 @@ func formatStandings(eventID int, standings []store.GameweekStanding, managers [
 		padding := managerColWidth - displayWidth
 		escapedName := esc(name)
 
-		b.WriteString(fmt.Sprintf("\n%-4s %s%s %4d %5d",
-			ordinal(s.Rank), escapedName, strings.Repeat(" ", padding), s.Points, s.TotalScore))
+		_, _ = fmt.Fprintf(&b, "\n%-4s %s%s %4d %5d",
+			ordinal(s.Rank), escapedName, strings.Repeat(" ", padding), s.Points, s.TotalScore)
 	}
 
 	b.WriteString("</pre>")
@@ -98,11 +98,11 @@ func formatStreaks(streaks []stats.CurrentStreak) string {
 
 		switch s.Kind {
 		case notify.StreakKindWin:
-			b.WriteString(fmt.Sprintf("\n%s \u2014 %d wins in a row (%s)",
-				name, s.Length, gwRange))
+			_, _ = fmt.Fprintf(&b, "\n%s \u2014 %d wins in a row (%s)",
+				name, s.Length, gwRange)
 		case notify.StreakKindLoss:
-			b.WriteString(fmt.Sprintf("\n%s \u2014 %d losses in a row (%s)",
-				name, s.Length, gwRange))
+			_, _ = fmt.Fprintf(&b, "\n%s \u2014 %d losses in a row (%s)",
+				name, s.Length, gwRange)
 		}
 	}
 
@@ -118,14 +118,14 @@ func formatH2HRecord(record stats.H2HRecord) string {
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("<b>%s vs %s</b>",
-		esc(record.ManagerA.Name), esc(record.ManagerB.Name)))
-	b.WriteString(fmt.Sprintf("\nPlayed: %d", record.GamesPlayed))
-	b.WriteString(fmt.Sprintf("\n%s wins: %d", esc(record.ManagerA.Name), record.ManagerAWins))
-	b.WriteString(fmt.Sprintf("\n%s wins: %d", esc(record.ManagerB.Name), record.ManagerBWins))
-	b.WriteString(fmt.Sprintf("\nDraws: %d", record.Draws))
-	b.WriteString(fmt.Sprintf("\nTotal pts: %d \u2013 %d",
-		record.ManagerAScore, record.ManagerBScore))
+	_, _ = fmt.Fprintf(&b, "<b>%s vs %s</b>",
+		esc(record.ManagerA.Name), esc(record.ManagerB.Name))
+	_, _ = fmt.Fprintf(&b, "\nPlayed: %d", record.GamesPlayed)
+	_, _ = fmt.Fprintf(&b, "\n%s wins: %d", esc(record.ManagerA.Name), record.ManagerAWins)
+	_, _ = fmt.Fprintf(&b, "\n%s wins: %d", esc(record.ManagerB.Name), record.ManagerBWins)
+	_, _ = fmt.Fprintf(&b, "\nDraws: %d", record.Draws)
+	_, _ = fmt.Fprintf(&b, "\nTotal pts: %d \u2013 %d",
+		record.ManagerAScore, record.ManagerBScore)
 
 	return b.String()
 }

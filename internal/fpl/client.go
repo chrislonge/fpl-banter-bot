@@ -177,7 +177,7 @@ func (c *Client) do(ctx context.Context, path string, target any) error {
 	if err != nil {
 		return fmt.Errorf("fetching %s: %w", path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Check for non-200 status codes. The FPL API returns 200 on success,
 	// 404 for bad IDs, and 503 during peak load.

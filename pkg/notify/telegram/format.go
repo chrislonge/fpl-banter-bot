@@ -117,58 +117,58 @@ func formatAwards(alerts []notify.Alert) string {
 	b.WriteString("<b>Awards Ceremony</b>")
 
 	if awards.ManagerOfTheWeek != nil {
-		b.WriteString(fmt.Sprintf("\n🏆 Manager of the Week: <b>%s</b> (%d pts)",
-			esc(awards.ManagerOfTheWeek.Manager.Name), awards.ManagerOfTheWeek.Score))
+		_, _ = fmt.Fprintf(&b, "\n🏆 Manager of the Week: <b>%s</b> (%d pts)",
+			esc(awards.ManagerOfTheWeek.Manager.Name), awards.ManagerOfTheWeek.Score)
 	}
 	if awards.WoodenSpoon != nil {
-		b.WriteString(fmt.Sprintf("\n💩 Wooden Spoon: <b>%s</b> took the spoon with %d pts",
-			esc(awards.WoodenSpoon.Manager.Name), awards.WoodenSpoon.Score))
+		_, _ = fmt.Fprintf(&b, "\n💩 Wooden Spoon: <b>%s</b> took the spoon with %d pts",
+			esc(awards.WoodenSpoon.Manager.Name), awards.WoodenSpoon.Score)
 	}
 	if awards.CaptainGenius != nil {
-		b.WriteString(fmt.Sprintf("\n🎯 Captain Genius: <b>%s</b> backed %s for %d pts",
+		_, _ = fmt.Fprintf(&b, "\n🎯 Captain Genius: <b>%s</b> backed %s for %d pts",
 			esc(awards.CaptainGenius.Manager.Name),
 			formatPlayer(awards.CaptainGenius.Captain),
-			awards.CaptainGenius.TotalPoints))
+			awards.CaptainGenius.TotalPoints)
 	}
 	if awards.ArmbandOfShame != nil {
-		b.WriteString(fmt.Sprintf("\n🤡 Armband of Shame: <b>%s</b> trusted %s (%d pts) while %s hauled %d",
+		_, _ = fmt.Fprintf(&b, "\n🤡 Armband of Shame: <b>%s</b> trusted %s (%d pts) while %s hauled %d",
 			esc(awards.ArmbandOfShame.Manager.Name),
 			formatPlayer(awards.ArmbandOfShame.Captain),
 			awards.ArmbandOfShame.CaptainPoints,
 			formatPlayer(awards.ArmbandOfShame.ConsensusCaptain),
-			awards.ArmbandOfShame.ConsensusPoints))
+			awards.ArmbandOfShame.ConsensusPoints)
 	}
 	if awards.BenchWarmer != nil {
-		b.WriteString(fmt.Sprintf("\n🪑 Bench Warmer: <b>%s</b> stranded %d pts on the bench",
-			esc(awards.BenchWarmer.Manager.Name), awards.BenchWarmer.PointsOnBench))
+		_, _ = fmt.Fprintf(&b, "\n🪑 Bench Warmer: <b>%s</b> stranded %d pts on the bench",
+			esc(awards.BenchWarmer.Manager.Name), awards.BenchWarmer.PointsOnBench)
 	}
 	if awards.BiggestThrashing != nil {
-		b.WriteString(fmt.Sprintf("\n💀 Biggest Thrashing: <b>%s</b> steamrolled %s %d-%d",
+		_, _ = fmt.Fprintf(&b, "\n💀 Biggest Thrashing: <b>%s</b> steamrolled %s %d-%d",
 			esc(awards.BiggestThrashing.Winner.Name),
 			esc(awards.BiggestThrashing.Loser.Name),
 			awards.BiggestThrashing.WinnerScore,
-			awards.BiggestThrashing.LoserScore))
+			awards.BiggestThrashing.LoserScore)
 	}
 	if awards.LuckiestWin != nil {
-		b.WriteString(fmt.Sprintf("\n🎰 Luckiest Win: <b>%s</b> snuck past %s %d-%d",
+		_, _ = fmt.Fprintf(&b, "\n🎰 Luckiest Win: <b>%s</b> snuck past %s %d-%d",
 			esc(awards.LuckiestWin.Winner.Name),
 			esc(awards.LuckiestWin.Loser.Name),
 			awards.LuckiestWin.WinnerScore,
-			awards.LuckiestWin.LoserScore))
+			awards.LuckiestWin.LoserScore)
 	}
 	if awards.UnluckiestLoss != nil {
-		b.WriteString(fmt.Sprintf("\n😤 Unluckiest Loss: <b>%s</b> lost %d-%d to %s and still beats everyone else this week",
+		_, _ = fmt.Fprintf(&b, "\n😤 Unluckiest Loss: <b>%s</b> lost %d-%d to %s and still beats everyone else this week",
 			esc(awards.UnluckiestLoss.Loser.Name),
 			awards.UnluckiestLoss.LoserScore,
 			awards.UnluckiestLoss.OpponentScore,
-			esc(awards.UnluckiestLoss.Opponent.Name)))
+			esc(awards.UnluckiestLoss.Opponent.Name))
 	}
 	if awards.PlotTwist != nil {
 		u := awards.PlotTwist
-		b.WriteString(fmt.Sprintf("\nPlot twist: %s-place %s mugged %s-place %s (%d-%d)",
+		_, _ = fmt.Fprintf(&b, "\nPlot twist: %s-place %s mugged %s-place %s (%d-%d)",
 			ordinal(u.WinnerPreviousRank), esc(u.Winner.Name),
 			ordinal(u.LoserPreviousRank), esc(u.Loser.Name),
-			u.WinnerScore, u.LoserScore))
+			u.WinnerScore, u.LoserScore)
 	}
 
 	return b.String()
@@ -286,8 +286,8 @@ func formatH2HResults(alerts []notify.Alert) string {
 		switch {
 		case r.WinnerID == nil:
 			// Draw.
-			b.WriteString(fmt.Sprintf("\n%s %d - %d %s — couldn't separate them",
-				name1, r.Score1, r.Score2, name2))
+			_, _ = fmt.Fprintf(&b, "\n%s %d - %d %s — couldn't separate them",
+				name1, r.Score1, r.Score2, name2)
 
 		case *r.WinnerID == r.Manager1.ID:
 			diff := r.Score1 - r.Score2
@@ -331,16 +331,16 @@ func formatRankChanges(alerts []notify.Alert) string {
 
 		switch {
 		case rc.MovedIntoFirst:
-			b.WriteString(fmt.Sprintf("\n%s has claimed the throne \xf0\x9f\x91\x91 (was %s)",
-				name, ordinal(rc.PreviousRank)))
+			_, _ = fmt.Fprintf(&b, "\n%s has claimed the throne \xf0\x9f\x91\x91 (was %s)",
+				name, ordinal(rc.PreviousRank))
 
 		case rc.CurrentRank < rc.PreviousRank:
-			b.WriteString(fmt.Sprintf("\n%s climbed from %s to %s",
-				name, ordinal(rc.PreviousRank), ordinal(rc.CurrentRank)))
+			_, _ = fmt.Fprintf(&b, "\n%s climbed from %s to %s",
+				name, ordinal(rc.PreviousRank), ordinal(rc.CurrentRank))
 
 		default:
-			b.WriteString(fmt.Sprintf("\n%s dropped from %s to %s",
-				name, ordinal(rc.PreviousRank), ordinal(rc.CurrentRank)))
+			_, _ = fmt.Fprintf(&b, "\n%s dropped from %s to %s",
+				name, ordinal(rc.PreviousRank), ordinal(rc.CurrentRank))
 		}
 	}
 
@@ -367,15 +367,15 @@ func formatStreaks(alerts []notify.Alert) string {
 		switch s.Kind {
 		case notify.StreakKindWin:
 			if s.Length >= 5 {
-				b.WriteString(fmt.Sprintf("\n%s is absolutely on fire \xf0\x9f\x94\xa5 — %d wins in a row (%s)",
-					name, s.Length, gwRange))
+				_, _ = fmt.Fprintf(&b, "\n%s is absolutely on fire \xf0\x9f\x94\xa5 — %d wins in a row (%s)",
+					name, s.Length, gwRange)
 			} else {
-				b.WriteString(fmt.Sprintf("\n%s on a %d-match winning streak (%s)",
-					name, s.Length, gwRange))
+				_, _ = fmt.Fprintf(&b, "\n%s on a %d-match winning streak (%s)",
+					name, s.Length, gwRange)
 			}
 		case notify.StreakKindLoss:
-			b.WriteString(fmt.Sprintf("\n%s in freefall — lost %d on the bounce (%s)",
-				name, s.Length, gwRange))
+			_, _ = fmt.Fprintf(&b, "\n%s in freefall — lost %d on the bounce (%s)",
+				name, s.Length, gwRange)
 		}
 	}
 
@@ -395,8 +395,8 @@ func formatChips(alerts []notify.Alert) string {
 		if c == nil {
 			continue
 		}
-		b.WriteString(fmt.Sprintf("\n%s activated <b>%s</b>",
-			esc(c.Manager.Name), esc(chipDisplayName(c.Chip))))
+		_, _ = fmt.Fprintf(&b, "\n%s activated <b>%s</b>",
+			esc(c.Manager.Name), esc(chipDisplayName(c.Chip)))
 	}
 
 	return b.String()

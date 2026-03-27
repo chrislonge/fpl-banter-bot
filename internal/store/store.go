@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -165,7 +166,7 @@ func (s *PostgresStore) SaveGameweekAwards(ctx context.Context, leagueID int64, 
 	}
 	defer func() {
 		if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
-			// Best-effort cleanup only.
+			slog.Warn("awards transaction rollback failed", "error", rbErr)
 		}
 	}()
 
@@ -211,8 +212,7 @@ func (s *PostgresStore) SaveGameweekSnapshot(ctx context.Context, snap GameweekS
 	}
 	defer func() {
 		if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
-			// Log but don't override the original error — rollback after
-			// commit returns pgx.ErrTxClosed, which is expected.
+			slog.Warn("snapshot transaction rollback failed", "error", rbErr)
 		}
 	}()
 

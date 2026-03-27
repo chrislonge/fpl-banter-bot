@@ -123,7 +123,7 @@ func (c *Client) postJSON(ctx context.Context, method string, payload any) error
 	if err != nil {
 		return fmt.Errorf("calling %s: %w", method, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Cap response reads to prevent unbounded memory allocation from a
 	// misbehaving upstream proxy. Telegram responses are typically < 1KB.
