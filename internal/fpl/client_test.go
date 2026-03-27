@@ -180,7 +180,7 @@ func TestGetBootstrapFieldMapping(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(body))
+		_, _ = w.Write([]byte(body))
 	}))
 	defer srv.Close()
 
@@ -249,7 +249,7 @@ func TestGetBootstrapUserAgent(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotUA = r.Header.Get("User-Agent")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"events":[],"teams":[]}`))
+		_, _ = w.Write([]byte(`{"events":[],"teams":[]}`))
 	}))
 	defer srv.Close()
 
@@ -303,7 +303,7 @@ func TestGetEventStatus(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tt.statusCode)
-				w.Write([]byte(tt.body))
+				_, _ = w.Write([]byte(tt.body))
 			}))
 			defer srv.Close()
 
@@ -386,7 +386,7 @@ func TestGetH2HStandings(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tt.statusCode)
-				w.Write([]byte(tt.body))
+				_, _ = w.Write([]byte(tt.body))
 			}))
 			defer srv.Close()
 
@@ -432,7 +432,7 @@ func TestGetH2HStandingsURLPath(t *testing.T) {
 		// r.URL includes path + query string
 		gotPath = r.URL.String()
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"league":{"id":1},"standings":{"has_next":false,"page":1,"results":[]}}`))
+		_, _ = w.Write([]byte(`{"league":{"id":1},"standings":{"has_next":false,"page":1,"results":[]}}`))
 	}))
 	defer srv.Close()
 
@@ -461,7 +461,7 @@ func TestGetAllH2HStandings(t *testing.T) {
 		page := r.URL.Query().Get("page_standings")
 		switch page {
 		case "1", "":
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"league": {"id": 916670, "name": "Capital FC", "scoring": "h"},
 				"standings": {
 					"has_next": true,
@@ -473,7 +473,7 @@ func TestGetAllH2HStandings(t *testing.T) {
 				}
 			}`))
 		case "2":
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"league": {"id": 916670, "name": "Capital FC", "scoring": "h"},
 				"standings": {
 					"has_next": false,
@@ -586,7 +586,7 @@ func TestGetH2HMatches(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tt.statusCode)
-				w.Write([]byte(tt.body))
+				_, _ = w.Write([]byte(tt.body))
 			}))
 			defer srv.Close()
 
@@ -629,7 +629,7 @@ func TestGetH2HMatchesURLPath(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.String()
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"has_next":false,"page":1,"results":[]}`))
+		_, _ = w.Write([]byte(`{"has_next":false,"page":1,"results":[]}`))
 	}))
 	defer srv.Close()
 
@@ -650,7 +650,7 @@ func TestGetAllH2HMatches(t *testing.T) {
 		page := r.URL.Query().Get("page")
 		switch page {
 		case "1", "":
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"has_next": true,
 				"page": 1,
 				"results": [
@@ -658,7 +658,7 @@ func TestGetAllH2HMatches(t *testing.T) {
 				]
 			}`))
 		case "2":
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"has_next": false,
 				"page": 2,
 				"results": [
@@ -694,7 +694,7 @@ func TestGetAllH2HMatches(t *testing.T) {
 func TestGetH2HStandings_GameUpdating503ReturnsSentinelError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte("The game is being updated."))
+		_, _ = w.Write([]byte("The game is being updated."))
 	}))
 	defer srv.Close()
 
@@ -714,7 +714,7 @@ func TestGetH2HStandings_GameUpdating503ReturnsSentinelError(t *testing.T) {
 func TestGetH2HStandings_Generic503DoesNotReturnGameUpdatingSentinel(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte("Service temporarily unavailable"))
+		_, _ = w.Write([]byte("Service temporarily unavailable"))
 	}))
 	defer srv.Close()
 
@@ -765,7 +765,7 @@ func TestGetManagerHistory(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tt.statusCode)
-				w.Write([]byte(tt.body))
+				_, _ = w.Write([]byte(tt.body))
 			}))
 			defer srv.Close()
 
@@ -815,7 +815,7 @@ func TestGetManagerHistoryURLPath(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"current":[],"chips":[]}`))
+		_, _ = w.Write([]byte(`{"current":[],"chips":[]}`))
 	}))
 	defer srv.Close()
 
@@ -883,7 +883,7 @@ func TestGetManagerPicks(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tt.statusCode)
-				w.Write([]byte(tt.body))
+				_, _ = w.Write([]byte(tt.body))
 			}))
 			defer srv.Close()
 
@@ -937,7 +937,7 @@ func TestGetManagerPicksURLPath(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"active_chip":null,"picks":[],"automatic_subs":[],"entry_history":{"event":10}}`))
+		_, _ = w.Write([]byte(`{"active_chip":null,"picks":[],"automatic_subs":[],"entry_history":{"event":10}}`))
 	}))
 	defer srv.Close()
 
@@ -980,7 +980,7 @@ func TestGetEventLive(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tt.statusCode)
-				w.Write([]byte(tt.body))
+				_, _ = w.Write([]byte(tt.body))
 			}))
 			defer srv.Close()
 
@@ -1014,7 +1014,7 @@ func TestGetEventLiveURLPath(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"elements":[]}`))
+		_, _ = w.Write([]byte(`{"elements":[]}`))
 	}))
 	defer srv.Close()
 
