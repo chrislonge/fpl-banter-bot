@@ -1088,7 +1088,7 @@ func TestContextCancellation(t *testing.T) {
 func TestClient_LogOutput(t *testing.T) {
 	t.Run("success path logs path, status, and duration_ms", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprint(w, `{"events":[]}`)
+			_, _ = fmt.Fprint(w, `{"events":[]}`)
 		}))
 		defer srv.Close()
 
@@ -1122,7 +1122,7 @@ func TestClient_LogOutput(t *testing.T) {
 	t.Run("non-200 path logs path, status, and duration_ms", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			fmt.Fprint(w, "The game is being updated.")
+			_, _ = fmt.Fprint(w, "The game is being updated.")
 		}))
 		defer srv.Close()
 
