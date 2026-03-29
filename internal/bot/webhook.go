@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 )
 
@@ -53,7 +52,7 @@ func (h *Handler) serveWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Debug("webhook POST received",
+	h.logger.Debug("webhook POST received",
 		"update_id", upd.UpdateID,
 		"has_message", upd.Message != nil)
 
