@@ -6,6 +6,7 @@ package config
 import (
 	"crypto/rand"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
@@ -43,7 +44,8 @@ type Config struct {
 	PollProcessingInterval int
 
 	// Logging
-	LogLevel string
+	LogLevel  string
+	LogFormat string // "text" (default) or "json"
 
 	// Display settings
 	DeadlineTimezone *time.Location // IANA timezone for /deadline display (default: Europe/London)
@@ -121,6 +123,27 @@ func Load() (Config, error) {
 		webhookSecret = fmt.Sprintf("%x", b)
 	}
 
+	// Validate LOG_LEVEL — fail fast on typos rather than silently falling back
+	// to "info". On a headless Pi, LOG_LEVEL=verbose should be an immediate
+	// startup error, not a silent default.
+	logLevel := getEnvOrDefault("LOG_LEVEL", "info")
+	switch logLevel {
+	case "debug", "info", "warn", "error":
+		// valid
+	default:
+		return Config{}, fmt.Errorf("LOG_LEVEL %q is not valid: must be debug, info, warn, or error", logLevel)
+	}
+
+	// Validate LOG_FORMAT — same fail-fast logic. LOG_FORMAT=jsno should not
+	// silently produce text output that you discover weeks later.
+	logFormat := getEnvOrDefault("LOG_FORMAT", "text")
+	switch logFormat {
+	case "text", "json":
+		// valid
+	default:
+		return Config{}, fmt.Errorf("LOG_FORMAT %q is not valid: must be text or json", logFormat)
+	}
+
 	// Resolve the deadline display timezone. Defaults to Europe/London because
 	// FPL is a Premier League product and deadlines are communicated in UK time.
 	// Operators can override this (e.g., "America/New_York") for their group.
@@ -143,7 +166,8 @@ func Load() (Config, error) {
 		PollIdleInterval:       getEnvAsIntOrDefault("POLL_IDLE_INTERVAL", 21600),
 		PollLiveInterval:       getEnvAsIntOrDefault("POLL_LIVE_INTERVAL", 900),
 		PollProcessingInterval: getEnvAsIntOrDefault("POLL_PROCESSING_INTERVAL", 600),
-		LogLevel:               getEnvOrDefault("LOG_LEVEL", "info"),
+		LogLevel:               logLevel,
+		LogFormat:              logFormat,
 		DeadlineTimezone:       deadlineTZ,
 	}, nil
 }
@@ -154,6 +178,51 @@ func getEnvOrDefault(key, defaultVal string) string {
 		return v
 	}
 	return defaultVal
+}
+
+// SetupLogger creates a *slog.Logger from the validated level and format
+// strings, sets it as the global default, and returns it.
+//
+// Go pattern — STRATEGY PATTERN VIA slog.Handler:
+//
+// slog separates "what to log" (slog.Logger) from "how to format it"
+// (slog.Handler). TextHandler and JSONHandler are two strategies for the
+// same interface. The call sites never know or care which handler is
+// active — they just call logger.Info(). The format decision is made
+// once, here, at startup. This is the same idea as injecting a
+// URLSession configuration in Swift — you configure the transport once,
+// and every request uses it transparently.
+//
+// The returned logger should be used with slog.With() to create child
+// loggers with pre-baked fields (e.g., "component", "league_id").
+// The global default is also set as a safety net for any code that
+// still calls bare slog.Info() directly.
+func SetupLogger(level, format string) *slog.Logger {
+	var logLevel slog.Level
+	switch level {
+	case "debug":
+		logLevel = slog.LevelDebug
+	case "warn":
+		logLevel = slog.LevelWarn
+	case "error":
+		logLevel = slog.LevelError
+	default:
+		logLevel = slog.LevelInfo
+	}
+
+	opts := &slog.HandlerOptions{Level: logLevel}
+
+	var handler slog.Handler
+	switch format {
+	case "json":
+		handler = slog.NewJSONHandler(os.Stdout, opts)
+	default:
+		handler = slog.NewTextHandler(os.Stdout, opts)
+	}
+
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
+	return logger
 }
 
 // getEnvAsIntOrDefault returns an env var parsed as int, or a default.
