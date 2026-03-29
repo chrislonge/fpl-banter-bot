@@ -151,7 +151,7 @@ type Poller struct {
 // catches misconfiguration immediately on startup rather than hours later
 // when the first gameweek finalizes. In Go, constructors are just regular
 // functions that return (T, error) — no special language syntax.
-func New(fplClient FPLClient, s store.Store, cfg Config, onFinalized OnGameweekFinalized) (*Poller, error) {
+func New(fplClient FPLClient, s store.Store, cfg Config, onFinalized OnGameweekFinalized, logger *slog.Logger) (*Poller, error) {
 	if cfg.LeagueType != "h2h" {
 		return nil, fmt.Errorf("unsupported league type %q: only \"h2h\" is supported", cfg.LeagueType)
 	}
@@ -165,12 +165,16 @@ func New(fplClient FPLClient, s store.Store, cfg Config, onFinalized OnGameweekF
 		return nil, fmt.Errorf("ProcessingInterval must be positive, got %v", cfg.ProcessingInterval)
 	}
 
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	return &Poller{
 		fpl:            fplClient,
 		store:          s,
 		onFinalized:    onFinalized,
 		cfg:            cfg,
-		logger:         slog.Default(),
+		logger:         logger,
 		state:          StateIdle,
 		rateLimitDelay: 500 * time.Millisecond,
 	}, nil

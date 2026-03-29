@@ -305,7 +305,7 @@ func defaultConfig() Config {
 // It sets bootstrap to non-nil so tick() doesn't always re-fetch during idle.
 // It also zeroes out the rate limit delay so tests don't wait on wall-clock time.
 func newTestPoller(fc *fakeFPLClient, fs *fakeStore, onFinalized OnGameweekFinalized) *Poller {
-	p, _ := New(fc, fs, defaultConfig(), onFinalized)
+	p, _ := New(fc, fs, defaultConfig(), onFinalized, nil)
 	// Pre-set bootstrap so we don't re-fetch on every idle tick in tests.
 	p.bootstrap = &fc.bootstrap
 	// Zero out rate limit so backfill tests run instantly.
@@ -339,7 +339,7 @@ func TestNew_RejectsClassicLeague(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.LeagueType = "classic"
 
-	_, err := New(&fakeFPLClient{}, &fakeStore{}, cfg, nil)
+	_, err := New(&fakeFPLClient{}, &fakeStore{}, cfg, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for classic league type, got nil")
 	}
@@ -358,7 +358,7 @@ func TestNew_RejectsZeroIntervals(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := defaultConfig()
 			tt.mutate(&cfg)
-			_, err := New(&fakeFPLClient{}, &fakeStore{}, cfg, nil)
+			_, err := New(&fakeFPLClient{}, &fakeStore{}, cfg, nil, nil)
 			if err == nil {
 				t.Fatal("expected error for invalid interval, got nil")
 			}
@@ -367,7 +367,7 @@ func TestNew_RejectsZeroIntervals(t *testing.T) {
 }
 
 func TestNew_AcceptsH2H(t *testing.T) {
-	p, err := New(&fakeFPLClient{}, &fakeStore{}, defaultConfig(), nil)
+	p, err := New(&fakeFPLClient{}, &fakeStore{}, defaultConfig(), nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -985,7 +985,7 @@ func TestIntervalForState(t *testing.T) {
 		LiveInterval:       15 * time.Minute,
 		ProcessingInterval: 10 * time.Minute,
 	}
-	p, _ := New(&fakeFPLClient{}, &fakeStore{}, cfg, nil)
+	p, _ := New(&fakeFPLClient{}, &fakeStore{}, cfg, nil, nil)
 
 	tests := []struct {
 		state State

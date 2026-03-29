@@ -330,7 +330,7 @@ func TestBackfill(t *testing.T) {
 				}
 			}
 
-			p, err := New(fc, fs, defaultConfig(), onFinalized)
+			p, err := New(fc, fs, defaultConfig(), onFinalized, nil)
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -424,7 +424,7 @@ func TestBackfill_Idempotent(t *testing.T) {
 		storedEventIDs: []int{},
 	}
 
-	p, err := New(fc, fs, defaultConfig(), nil)
+	p, err := New(fc, fs, defaultConfig(), nil, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -477,7 +477,7 @@ func TestBackfill_ChipsFilteredPerGW(t *testing.T) {
 		storedEventIDs: []int{},
 	}
 
-	p, err := New(fc, fs, defaultConfig(), nil)
+	p, err := New(fc, fs, defaultConfig(), nil, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
