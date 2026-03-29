@@ -1119,7 +1119,7 @@ func TestClient_LogOutput(t *testing.T) {
 		}
 	})
 
-	t.Run("error path logs path and duration_ms without status", func(t *testing.T) {
+	t.Run("non-200 path logs path, status, and duration_ms", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			fmt.Fprint(w, "The game is being updated.")

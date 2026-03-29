@@ -192,7 +192,7 @@ func New(
 func (h *Handler) RunServer(ctx context.Context) error {
 	// Register the webhook with Telegram on startup.
 	if err := h.tg.SetWebhook(ctx, h.webhookURL); err != nil {
-		return fmt.Errorf("registering webhook %s: %w", h.webhookURL, err)
+		return fmt.Errorf("registering webhook: %w", err)
 	}
 	h.logger.Info("webhook registered")
 

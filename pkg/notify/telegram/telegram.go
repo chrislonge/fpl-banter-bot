@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/chrislonge/fpl-banter-bot/pkg/notify"
@@ -138,9 +140,17 @@ func (c *Client) postJSON(ctx context.Context, method string, payload any) error
 	duration := time.Since(start).Milliseconds()
 
 	// Network error — resp is nil, no status to log.
+	// Unwrap *url.Error to strip the request URL (which contains the bot
+	// token) from logs and propagated errors. uerr.Err holds the
+	// underlying transport/DNS cause without the URL.
 	if err != nil {
-		c.logger.Warn("telegram api error", "method", method, "duration_ms", duration, "error", err)
-		return fmt.Errorf("calling %s: %w", method, err)
+		logErr := err
+		var uerr *url.Error
+		if errors.As(err, &uerr) {
+			logErr = uerr.Err
+		}
+		c.logger.Warn("telegram api error", "method", method, "duration_ms", duration, "error", logErr)
+		return fmt.Errorf("calling %s: %w", method, logErr)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
