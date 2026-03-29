@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -79,7 +80,8 @@ type Store interface {
 
 // PostgresStore implements Store using a pgx connection pool.
 type PostgresStore struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	logger *slog.Logger
 }
 
 // Go concept — COMPILE-TIME INTERFACE CHECK:
@@ -100,8 +102,14 @@ var _ Store = (*PostgresStore)(nil)
 // The pool is injected rather than created here — the caller (main.go)
 // owns the pool's lifecycle and passes it in. This follows the same
 // Dependency Injection pattern used for the FPL client's http.Client.
-func New(pool *pgxpool.Pool) *PostgresStore {
-	return &PostgresStore{pool: pool}
+//
+// logger is the structured logger for transaction tracing. If nil,
+// slog.Default() is used (nil-means-default convention).
+func New(pool *pgxpool.Pool, logger *slog.Logger) *PostgresStore {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &PostgresStore{pool: pool, logger: logger}
 }
 
 // ---------------------------------------------------------------------------
@@ -160,13 +168,15 @@ func (s *PostgresStore) UpsertGameweekAward(ctx context.Context, award GameweekA
 }
 
 func (s *PostgresStore) SaveGameweekAwards(ctx context.Context, leagueID int64, eventID int, awards []GameweekAward) error {
+	start := time.Now()
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() {
 		if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
-			slog.Warn("awards transaction rollback failed", "error", rbErr)
+			s.logger.Warn("awards transaction rollback failed", "error", rbErr)
 		}
 	}()
 
@@ -186,7 +196,17 @@ func (s *PostgresStore) SaveGameweekAwards(ctx context.Context, leagueID int64, 
 		}
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	s.logger.Debug("awards saved",
+		"league_id", leagueID,
+		"event_id", eventID,
+		"award_count", len(awards),
+		"duration_ms", time.Since(start).Milliseconds(),
+	)
+	return nil
 }
 
 // SaveGameweekSnapshot writes an entire gameweek's data atomically using
@@ -206,13 +226,15 @@ func (s *PostgresStore) SaveGameweekAwards(ctx context.Context, leagueID int64, 
 // transaction does nothing). This pattern guarantees cleanup regardless
 // of which code path executes.
 func (s *PostgresStore) SaveGameweekSnapshot(ctx context.Context, snap GameweekSnapshot) error {
+	start := time.Now()
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() {
 		if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
-			slog.Warn("snapshot transaction rollback failed", "error", rbErr)
+			s.logger.Warn("snapshot transaction rollback failed", "error", rbErr)
 		}
 	}()
 
@@ -256,7 +278,20 @@ func (s *PostgresStore) SaveGameweekSnapshot(ctx context.Context, snap GameweekS
 		return fmt.Errorf("upsert snapshot meta: %w", err)
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	s.logger.Debug("snapshot saved",
+		"league_id", snap.Meta.LeagueID,
+		"event_id", snap.Meta.EventID,
+		"standings", len(snap.Standings),
+		"chips", len(snap.Chips),
+		"h2h_results", len(snap.Results),
+		"manager_stats", len(snap.ManagerStats),
+		"duration_ms", time.Since(start).Milliseconds(),
+	)
+	return nil
 }
 
 // ---------------------------------------------------------------------------
