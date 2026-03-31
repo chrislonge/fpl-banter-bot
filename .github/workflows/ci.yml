@@ -27,6 +27,9 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      - name: Build all entrypoints
+        run: go build ./cmd/...
+
   test:
     name: Test
     runs-on: ubuntu-latest

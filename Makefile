@@ -31,7 +31,7 @@ lint:
 
 ## Run the bot
 run:
-	go run ./cmd/bot
+	@go run ./cmd/bot
 
 ## Backfill and enrich finished current-season gameweeks (local, requires Postgres running)
 backfill:

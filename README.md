@@ -190,6 +190,7 @@ All configuration comes from environment variables. See [`.env.example`](.env.ex
 | `POLL_PROCESSING_INTERVAL` | No | Seconds between polls while FPL is still processing results |
 | `DEADLINE_TIMEZONE` | No | IANA timezone for `/deadline` |
 | `LOG_LEVEL` | No | `debug`, `info`, `warn`, or `error` |
+| `LOG_FORMAT` | No | `text` (human-readable) or `json` (structured). Default `text` |
 
 ## Project layout
 
@@ -281,6 +282,29 @@ You can also send a real formatting test message to your Telegram chat:
 ```bash
 make test-telegram
 ```
+
+### Viewing logs
+
+The bot uses structured logging via Go's `slog` package. Set `LOG_FORMAT` to control the output format.
+
+`LOG_FORMAT=text` (default) produces human-readable output, good for local development:
+
+```
+time=2026-03-31T10:00:00Z level=INFO msg="poller starting" component=poller league_id=12345
+time=2026-03-31T10:00:00Z level=DEBUG msg="sleeping until next tick" component=poller state=idle interval=21600000000000
+```
+
+`LOG_FORMAT=json` produces one JSON object per line, suitable for log aggregators (Grafana Loki, Datadog) or `jq` filtering:
+
+```bash
+# Live-filter logs to a single component
+make run 2>&1 | jq -R 'try fromjson | select(.component == "poller")'
+
+# Show only warnings and errors
+make run 2>&1 | jq -R 'try fromjson | select(.level == "WARN" or .level == "ERROR")'
+```
+
+Every log line carries a `component` field (`fpl`, `store`, `poller`, `stats`, `telegram`, `bot`) so you can isolate any layer of the stack. Set `LOG_LEVEL=debug` to see HTTP call traces and state machine transitions.
 
 ## Deployment notes
 
