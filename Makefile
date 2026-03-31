@@ -31,11 +31,11 @@ lint:
 
 ## Run the bot
 run:
-	go run cmd/bot/main.go
+	@go run ./cmd/bot
 
 ## Backfill and enrich finished current-season gameweeks (local, requires Postgres running)
 backfill:
-	go run cmd/backfill/main.go
+	go run ./cmd/backfill
 
 ## Backfill via Docker Compose (used on Pi or any Docker deployment).
 ## `--build` keeps the one-shot tool image in sync with the latest code.

@@ -38,18 +38,28 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Configure the structured logger based on the configured log level.
-	setupLogger(cfg.LogLevel)
+	// Configure the structured logger. SetupLogger sets the global slog
+	// default (safety net) and returns a *slog.Logger for child loggers.
+	// We then create per-component child loggers with slog.With() — each
+	// child has "component" (and "league_id" where appropriate) baked in,
+	// so every log line from that component is instantly filterable.
+	logger := config.SetupLogger(cfg.LogLevel, cfg.LogFormat)
+	mainLog := logger.With("component", "main", "league_id", cfg.FPLLeagueID)
+	fplLog := logger.With("component", "fpl")
+	storeLog := logger.With("component", "store")
+	pollerLog := logger.With("component", "poller", "league_id", cfg.FPLLeagueID)
+	statsLog := logger.With("component", "stats", "league_id", cfg.FPLLeagueID)
+	tgLog := logger.With("component", "telegram")
+	botLog := logger.With("component", "bot")
 
-	slog.Info("starting fpl-banter-bot",
-		"league_id", cfg.FPLLeagueID,
+	mainLog.Info("starting fpl-banter-bot",
 		"league_type", cfg.FPLLeagueType,
 	)
 
 	if cfg.TelegramConfigured {
-		slog.Info("telegram credentials configured", "platform", "telegram")
+		mainLog.Info("telegram credentials configured", "platform", "telegram")
 	} else {
-		slog.Info("running in data-collection-only mode (no notification credentials configured)")
+		mainLog.Info("running in data-collection-only mode (no notification credentials configured)")
 	}
 
 	// Signal-based graceful shutdown.
@@ -74,7 +84,7 @@ func main() {
 	// for any long-running service.
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
-		slog.Error("failed to create database pool", "error", err)
+		mainLog.Error("failed to create database pool", "error", err)
 		os.Exit(1)
 	}
 	// defer schedules pool.Close() to run when main() returns.
@@ -85,11 +95,11 @@ func main() {
 	// check — fail fast on startup rather than discovering the DB is
 	// down when the first gameweek finalizes.
 	if err := pool.Ping(ctx); err != nil {
-		slog.Error("failed to ping database", "error", err)
+		mainLog.Error("failed to ping database", "error", err)
 		os.Exit(1)
 	}
 
-	slog.Info("connected to database")
+	mainLog.Info("connected to database")
 
 	// Create the FPL API client. We pass a custom *http.Client with an
 	// explicit timeout rather than relying on the default (which has no
@@ -100,29 +110,29 @@ func main() {
 	// we configure the transport externally and pass it in.
 	fplClient := fpl.NewClient("https://fantasy.premierleague.com/api", &http.Client{
 		Timeout: 30 * time.Second,
-	})
+	}, fplLog)
 
 	// Smoke-test the FPL API on startup, same "fail fast" pattern as the
 	// database ping. If the API is unreachable, we want to know immediately
 	// rather than discovering it when the first gameweek finalizes.
 	status, err := fplClient.GetEventStatus(ctx)
 	if err != nil {
-		slog.Error("failed to reach FPL API", "error", err)
+		mainLog.Error("failed to reach FPL API", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("FPL API reachable", "leagues_status", status.Leagues)
+	mainLog.Info("FPL API reachable", "leagues_status", status.Leagues)
 
 	// Run database migrations. The SQL files are embedded in the binary
 	// via //go:embed, so there are no external files to deploy.
 	if err := store.RunMigrations(cfg.DatabaseURL); err != nil {
-		slog.Error("failed to run database migrations", "error", err)
+		mainLog.Error("failed to run database migrations", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("database migrations complete")
+	mainLog.Info("database migrations complete")
 
 	// Create the store — the persistence layer between the FPL client
 	// and the future stats engine/poller.
-	appStore := store.New(pool)
+	appStore := store.New(pool, storeLog)
 
 	// Configure the poller — the adaptive polling state machine that
 	// drives the bot's gameweek lifecycle.
@@ -166,11 +176,12 @@ func main() {
 	if cfg.TelegramConfigured {
 		playerLookup := newPlayerLookup(fplClient)
 
-		statsEngine = stats.NewWithPlayerLookup(appStore, int64(cfg.FPLLeagueID), playerLookup)
+		statsEngine = stats.NewWithPlayerLookup(appStore, int64(cfg.FPLLeagueID), playerLookup, statsLog)
 		tgNotifier = telegram.New(
 			&http.Client{Timeout: 10 * time.Second},
 			cfg.TelegramBotToken,
 			cfg.TelegramChatID,
+			tgLog,
 		)
 
 		onFinalized = func(ctx context.Context, eventID int) error {
@@ -179,10 +190,10 @@ func main() {
 				return fmt.Errorf("build alerts for event %d: %w", eventID, err)
 			}
 			if len(alerts) == 0 {
-				slog.Info("no alerts to send", "event_id", eventID)
+				mainLog.Info("no alerts to send", "event_id", eventID)
 				return nil
 			}
-			slog.Info("sending alerts", "event_id", eventID, "alert_count", len(alerts))
+			mainLog.Info("sending alerts", "event_id", eventID, "alert_count", len(alerts))
 			return tgNotifier.SendAlerts(ctx, alerts)
 		}
 
@@ -198,7 +209,7 @@ func main() {
 		}
 		chatID, err := strconv.ParseInt(cfg.TelegramChatID, 10, 64)
 		if err != nil {
-			slog.Error("invalid TELEGRAM_CHAT_ID for command registration", "error", err)
+			mainLog.Error("invalid TELEGRAM_CHAT_ID for command registration", "error", err)
 			os.Exit(1)
 		}
 		chatScope := &telegram.BotCommandScope{Type: "chat", ChatID: chatID}
@@ -206,18 +217,18 @@ func main() {
 		// Clear any previously-set default-scope commands so they don't
 		// leak into other chats.
 		if err := tgNotifier.DeleteMyCommands(ctx, nil); err != nil {
-			slog.Warn("failed to clear default-scope commands", "error", err)
+			mainLog.Warn("failed to clear default-scope commands", "error", err)
 		}
 		if err := tgNotifier.SetMyCommands(ctx, tgCmds, chatScope); err != nil {
-			slog.Warn("failed to register bot commands", "error", err)
+			mainLog.Warn("failed to register bot commands", "error", err)
 		}
 
-		slog.Info("notification pipeline wired", "platform", "telegram")
+		mainLog.Info("notification pipeline wired", "platform", "telegram")
 	}
 
-	p, err := poller.New(fplClient, appStore, pollerCfg, onFinalized)
+	p, err := poller.New(fplClient, appStore, pollerCfg, onFinalized, pollerLog)
 	if err != nil {
-		slog.Error("failed to create poller", "error", err)
+		mainLog.Error("failed to create poller", "error", err)
 		os.Exit(1)
 	}
 
@@ -243,11 +254,11 @@ func main() {
 	// we need structured concurrency to ensure clean shutdown of both.
 	g, gctx := errgroup.WithContext(ctx)
 
-	slog.Info("starting poller")
+	mainLog.Info("starting poller")
 	g.Go(func() error { return p.Run(gctx) })
 
 	if cfg.TelegramConfigured {
-		slog.Info("webhook configured", "base_url", cfg.WebhookBaseURL)
+		mainLog.Info("webhook configured", "base_url", cfg.WebhookBaseURL)
 
 		// Wire the bot server with all its dependencies.
 		//
@@ -263,12 +274,13 @@ func main() {
 			fplClient,   // satisfies bot.FPLQuerier
 			p,           // satisfies bot.PollerStatusProvider
 			bot.Config{
-				LeagueID:       int64(cfg.FPLLeagueID),
-				ChatID:         cfg.TelegramChatID,
-				Port:           cfg.WebhookPort,
+				LeagueID:         int64(cfg.FPLLeagueID),
+				ChatID:           cfg.TelegramChatID,
+				Port:             cfg.WebhookPort,
 				WebhookBaseURL:   cfg.WebhookBaseURL,
 				WebhookSecret:    cfg.WebhookSecret,
 				DeadlineTimezone: cfg.DeadlineTimezone,
+				Logger:           botLog,
 			},
 		)
 
@@ -276,30 +288,8 @@ func main() {
 	}
 
 	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
-		slog.Error("bot exited with error", "error", err)
+		mainLog.Error("bot exited with error", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("shutdown complete")
-}
-
-// setupLogger configures the global slog logger with the given level.
-// slog is Go's stdlib structured logger. It outputs key-value pairs
-// that are easy to search and filter in production.
-func setupLogger(level string) {
-	var logLevel slog.Level
-	switch level {
-	case "debug":
-		logLevel = slog.LevelDebug
-	case "warn":
-		logLevel = slog.LevelWarn
-	case "error":
-		logLevel = slog.LevelError
-	default:
-		logLevel = slog.LevelInfo
-	}
-
-	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: logLevel,
-	})
-	slog.SetDefault(slog.New(handler))
+	mainLog.Info("shutdown complete")
 }

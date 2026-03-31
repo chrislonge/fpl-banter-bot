@@ -1,7 +1,11 @@
 package stats
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/chrislonge/fpl-banter-bot/internal/store"
@@ -470,4 +474,73 @@ func cloneSlice[T any](in []T) []T {
 
 func intPtr(v int) *int {
 	return &v
+}
+
+// TestEngine_LogOutput verifies that BuildGameweekAlerts emits structured
+// log fields (event_id, alert_count) when a logger is injected. This uses
+// a buffer-backed slog.JSONHandler — the same pattern as the fpl.Client
+// log output test.
+func TestEngine_LogOutput(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	engine := NewWithPlayerLookup(&fakeStore{
+		standingsByEvent: map[int][]store.GameweekStanding{
+			1: {{LeagueID: 1, EventID: 1, ManagerID: 101, Rank: 1, TotalScore: 50}},
+		},
+		resultsByEvent: map[int][]store.H2HResult{
+			1: {{LeagueID: 1, EventID: 1, Manager1ID: 101, Manager1Score: 50, Manager2ID: 102, Manager2Score: 40}},
+		},
+		managerStatsByEvent: map[int][]store.GameweekManagerStat{},
+		managers: []store.Manager{
+			{LeagueID: 1, ID: 101, Name: "Alice", TeamName: "Alice FC"},
+			{LeagueID: 1, ID: 102, Name: "Bob", TeamName: "Bob FC"},
+		},
+		metaByEvent: map[int]store.SnapshotMeta{
+			1: {LeagueID: 1, EventID: 1, Source: "test", StandingsFidelity: "historical"},
+		},
+	}, 1, nil, logger)
+
+	alerts, err := engine.BuildGameweekAlerts(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(alerts) == 0 {
+		t.Fatal("expected at least one alert")
+	}
+
+	// Parse the log output — should contain the "alerts built" line.
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	foundBuildingLine := false
+	foundBuiltLine := false
+
+	for _, line := range lines {
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("log output is not valid JSON: %v\nraw: %s", err, line)
+		}
+
+		switch entry["msg"] {
+		case "building alerts":
+			foundBuildingLine = true
+			if entry["event_id"] == nil {
+				t.Error("'building alerts' line missing event_id")
+			}
+		case "alerts built":
+			foundBuiltLine = true
+			if entry["event_id"] == nil {
+				t.Error("'alerts built' line missing event_id")
+			}
+			if entry["alert_count"] == nil {
+				t.Error("'alerts built' line missing alert_count")
+			}
+		}
+	}
+
+	if !foundBuildingLine {
+		t.Error("expected 'building alerts' log line")
+	}
+	if !foundBuiltLine {
+		t.Error("expected 'alerts built' log line")
+	}
 }

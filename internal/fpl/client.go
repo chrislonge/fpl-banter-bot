@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -43,6 +44,7 @@ import (
 type Client struct {
 	baseURL    string       // e.g., "https://fantasy.premierleague.com/api"
 	httpClient *http.Client // the actual HTTP transport
+	logger     *slog.Logger // structured logger for request tracing
 }
 
 // maxH2HStandingsPages is a defensive guard to prevent infinite pagination
@@ -87,20 +89,28 @@ func IsGameUpdating(err error) bool {
 // baseURL is the API root (e.g., "https://fantasy.premierleague.com/api").
 // httpClient allows callers to configure timeouts and transport settings.
 // If nil, a default client with a 30-second timeout is used.
+// logger is the structured logger for request tracing. If nil, slog.Default()
+// is used — this is the nil-means-default convention that keeps tests simple
+// (pass nil) while allowing production code to inject a child logger with
+// pre-baked fields like "component".
 //
 // Why accept *http.Client instead of creating one internally?
 //   - Tests can pass a client wired to an httptest.Server (no real network).
 //   - The caller owns timeout policy — the FPL client shouldn't decide this.
 //   - Single Responsibility: this client does FPL-specific logic, not HTTP config.
-func NewClient(baseURL string, httpClient *http.Client) *Client {
+func NewClient(baseURL string, httpClient *http.Client, logger *slog.Logger) *Client {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
+	}
+	if logger == nil {
+		logger = slog.Default()
 	}
 	return &Client{
 		// strings.TrimRight removes trailing slashes so we can safely
 		// build URLs with baseURL + "/" + path without double slashes.
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		httpClient: httpClient,
+		logger:     logger,
 	}
 }
 
@@ -173,8 +183,21 @@ func (c *Client) do(ctx context.Context, path string, target any) error {
 
 	// Execute the request. Do() respects the context — if ctx is cancelled,
 	// this returns immediately with an error.
+	//
+	// Duration logging uses separate paths because resp is nil on network
+	// errors — accessing resp.StatusCode in the error path would panic.
+	start := time.Now()
 	resp, err := c.httpClient.Do(req)
+	duration := time.Since(start).Milliseconds()
+
+	// Error path: network failure, DNS resolution, context cancellation.
+	// resp is nil here — do not access any response fields.
 	if err != nil {
+		c.logger.Warn("fpl api error",
+			"path", path,
+			"duration_ms", duration,
+			"error", err,
+		)
 		return fmt.Errorf("fetching %s: %w", path, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -182,6 +205,12 @@ func (c *Client) do(ctx context.Context, path string, target any) error {
 	// Check for non-200 status codes. The FPL API returns 200 on success,
 	// 404 for bad IDs, and 503 during peak load.
 	if resp.StatusCode != http.StatusOK {
+		c.logger.Warn("fpl api non-200",
+			"path", path,
+			"status", resp.StatusCode,
+			"duration_ms", duration,
+		)
+
 		const maxErrorBodyBytes = 4096
 
 		var bodySnippet string
@@ -209,6 +238,13 @@ func (c *Client) do(ctx context.Context, path string, target any) error {
 	if err := json.NewDecoder(resp.Body).Decode(target); err != nil {
 		return fmt.Errorf("decoding %s: %w", path, err)
 	}
+
+	// Success path — log at Debug to avoid noise during normal operation.
+	c.logger.Debug("fpl api call",
+		"path", path,
+		"status", resp.StatusCode,
+		"duration_ms", duration,
+	)
 
 	return nil
 }

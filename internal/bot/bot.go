@@ -110,6 +110,7 @@ type Config struct {
 	WebhookBaseURL   string
 	WebhookSecret    string
 	DeadlineTimezone *time.Location // resolved IANA timezone for /deadline display
+	Logger           *slog.Logger   // if nil, slog.Default() is used
 }
 
 // Handler is the core bot server. It routes incoming Telegram updates to
@@ -120,6 +121,7 @@ type Handler struct {
 	store  LeagueStore
 	fpl    FPLQuerier
 	poller PollerStatusProvider
+	logger *slog.Logger
 
 	leagueID         int64
 	chatID           string
@@ -151,6 +153,11 @@ func New(
 		tz = time.UTC
 	}
 
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	webhookURL := strings.TrimRight(cfg.WebhookBaseURL, "/") + "/webhook/" + cfg.WebhookSecret
 	return &Handler{
 		tg:            tg,
@@ -158,6 +165,7 @@ func New(
 		store:         leagueStore,
 		fpl:           fplQuerier,
 		poller:        poller,
+		logger:        logger,
 		leagueID:      cfg.LeagueID,
 		chatID:        cfg.ChatID,
 		port:          cfg.Port,
@@ -184,9 +192,9 @@ func New(
 func (h *Handler) RunServer(ctx context.Context) error {
 	// Register the webhook with Telegram on startup.
 	if err := h.tg.SetWebhook(ctx, h.webhookURL); err != nil {
-		return fmt.Errorf("registering webhook %s: %w", h.webhookURL, err)
+		return fmt.Errorf("registering webhook: %w", err)
 	}
-	slog.Info("webhook registered")
+	h.logger.Info("webhook registered")
 
 	// Go pattern — PATH-BASED SECRET:
 	//
@@ -211,7 +219,7 @@ func (h *Handler) RunServer(ctx context.Context) error {
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
 
-	slog.Info("bot server listening", "port", h.port)
+	h.logger.Info("bot server listening", "port", h.port)
 
 	select {
 	case <-ctx.Done():
@@ -222,9 +230,9 @@ func (h *Handler) RunServer(ctx context.Context) error {
 		// Best-effort webhook deregistration — if it fails, Telegram will
 		// eventually time out and stop retrying on its own.
 		if err := h.tg.DeleteWebhook(shutCtx); err != nil {
-			slog.Warn("deleteWebhook failed during shutdown", "error", err)
+			h.logger.Warn("deleteWebhook failed during shutdown", "error", err)
 		} else {
-			slog.Info("webhook deregistered")
+			h.logger.Info("webhook deregistered")
 		}
 
 		return srv.Shutdown(shutCtx)
@@ -242,7 +250,7 @@ func (h *Handler) RunServer(ctx context.Context) error {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if delErr := h.tg.DeleteWebhook(cleanupCtx); delErr != nil {
-			slog.Warn("deleteWebhook failed after server error", "error", delErr)
+			h.logger.Warn("deleteWebhook failed after server error", "error", delErr)
 		}
 
 		return fmt.Errorf("webhook server: %w", err)
@@ -272,7 +280,7 @@ func (h *Handler) handleUpdate(ctx context.Context, upd update) {
 
 	// Chat ID filtering — only respond to the configured group chat.
 	if strconv.FormatInt(upd.Message.Chat.ID, 10) != h.chatID {
-		slog.Debug("ignoring update from unauthorized chat",
+		h.logger.Debug("ignoring update from unauthorized chat",
 			"chat_id", upd.Message.Chat.ID)
 		return
 	}
@@ -294,7 +302,7 @@ func (h *Handler) handleUpdate(ctx context.Context, upd update) {
 	command := strings.ToLower(strings.SplitN(parts[0], "@", 2)[0])
 	args := parts[1:]
 
-	slog.Debug("webhook received command",
+	h.logger.Debug("webhook received command",
 		"update_id", upd.UpdateID,
 		"chat_id", upd.Message.Chat.ID,
 		"command", command,
@@ -302,7 +310,7 @@ func (h *Handler) handleUpdate(ctx context.Context, upd update) {
 
 	response, err := h.dispatchCommand(ctx, command, args)
 	if err != nil {
-		slog.Warn("command error", "command", command, "error", err)
+		h.logger.Warn("command error", "command", command, "error", err)
 		response = "Sorry, something went wrong. Try again later."
 	}
 
@@ -312,7 +320,7 @@ func (h *Handler) handleUpdate(ctx context.Context, upd update) {
 	}
 
 	if err := h.tg.SendRaw(ctx, h.chatID, response); err != nil {
-		slog.Error("send reply failed", "command", command, "error", err)
+		h.logger.Error("send reply failed", "command", command, "error", err)
 	}
 }
 

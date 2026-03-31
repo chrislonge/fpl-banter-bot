@@ -42,10 +42,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	setupLogger(cfg.LogLevel)
+	logger := config.SetupLogger(cfg.LogLevel, cfg.LogFormat)
+	mainLog := logger.With("component", "main", "league_id", cfg.FPLLeagueID)
+	fplLog := logger.With("component", "fpl")
+	storeLog := logger.With("component", "store")
+	statsLog := logger.With("component", "stats", "league_id", cfg.FPLLeagueID)
+	tgLog := logger.With("component", "telegram")
 
 	if !cfg.TelegramConfigured && !*dryRun {
-		slog.Error("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set (or use --dry-run)")
+		mainLog.Error("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set (or use --dry-run)")
 		os.Exit(1)
 	}
 
@@ -53,32 +58,32 @@ func main() {
 
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
-		slog.Error("failed to create database pool", "error", err)
+		mainLog.Error("failed to create database pool", "error", err)
 		os.Exit(1)
 	}
 	defer pool.Close()
 
 	if err := pool.Ping(ctx); err != nil {
-		slog.Error("failed to ping database", "error", err)
+		mainLog.Error("failed to ping database", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("connected to database")
+	mainLog.Info("connected to database")
 
 	if err := store.RunMigrations(cfg.DatabaseURL); err != nil {
-		slog.Error("failed to run database migrations", "error", err)
+		mainLog.Error("failed to run database migrations", "error", err)
 		os.Exit(1)
 	}
 
-	appStore := store.New(pool)
+	appStore := store.New(pool, storeLog)
 	fplClient := fpl.NewClient("https://fantasy.premierleague.com/api", &http.Client{
 		Timeout: 30 * time.Second,
-	})
+	}, fplLog)
 	playerLookup := newPlayerLookup(fplClient)
-	statsEngine := stats.NewWithPlayerLookup(appStore, int64(cfg.FPLLeagueID), playerLookup)
+	statsEngine := stats.NewWithPlayerLookup(appStore, int64(cfg.FPLLeagueID), playerLookup, statsLog)
 
 	if *verify {
 		if err := runVerification(ctx, appStore, statsEngine, int64(cfg.FPLLeagueID), *verifyLast); err != nil {
-			slog.Error("verification failed", "error", err)
+			mainLog.Error("verification failed", "error", err)
 			os.Exit(1)
 		}
 		return
@@ -86,29 +91,29 @@ func main() {
 
 	eventID, err := resolveEventID(ctx, appStore, int64(cfg.FPLLeagueID))
 	if err != nil {
-		slog.Error("failed to resolve event ID", "error", err)
+		mainLog.Error("failed to resolve event ID", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("targeting event", "event_id", eventID)
+	mainLog.Info("targeting event", "event_id", eventID)
 
 	alerts, err := statsEngine.BuildGameweekAlerts(ctx, eventID)
 	if err != nil {
-		slog.Error("failed to build alerts", "error", err)
+		mainLog.Error("failed to build alerts", "error", err)
 		os.Exit(1)
 	}
 
-	slog.Info("alerts built", "count", len(alerts))
+	mainLog.Info("alerts built", "count", len(alerts))
 	for i, a := range alerts {
-		slog.Info(fmt.Sprintf("alert[%d]", i), "kind", a.Kind)
+		mainLog.Info(fmt.Sprintf("alert[%d]", i), "kind", a.Kind)
 	}
 
 	if len(alerts) == 0 {
-		slog.Warn("no alerts generated — check that the event has standings, h2h results, and snapshot_meta with 'historical' fidelity")
+		mainLog.Warn("no alerts generated — check that the event has standings, h2h results, and snapshot_meta with 'historical' fidelity")
 		os.Exit(0)
 	}
 
 	if *dryRun {
-		slog.Info("dry run — skipping Telegram delivery and previewing the awards-first Telegram recap",
+		mainLog.Info("dry run — skipping Telegram delivery and previewing the awards-first Telegram recap",
 			"event_id", eventID,
 			"alert_count", len(alerts),
 		)
@@ -116,7 +121,7 @@ func main() {
 		// Preview the formatted messages so you can see the exact output.
 		messages, err := telegram.FormatAlerts(alerts)
 		if err != nil {
-			slog.Error("failed to format alerts", "error", err)
+			mainLog.Error("failed to format alerts", "error", err)
 			os.Exit(1)
 		}
 		for i, msg := range messages {
@@ -129,14 +134,15 @@ func main() {
 		&http.Client{Timeout: 10 * time.Second},
 		cfg.TelegramBotToken,
 		cfg.TelegramChatID,
+		tgLog,
 	)
 
 	if err := notifier.SendAlerts(ctx, alerts); err != nil {
-		slog.Error("failed to send alerts", "error", err)
+		mainLog.Error("failed to send alerts", "error", err)
 		os.Exit(1)
 	}
 
-	slog.Info("alerts sent successfully", "event_id", eventID, "count", len(alerts))
+	mainLog.Info("alerts sent successfully", "event_id", eventID, "count", len(alerts))
 }
 
 // resolveEventID returns the event ID from the GW env var if set,
@@ -158,22 +164,6 @@ func resolveEventID(ctx context.Context, appStore store.Store, leagueID int64) (
 		return 0, fmt.Errorf("no events found in database for league %d — run make backfill first", leagueID)
 	}
 	return eventID, nil
-}
-
-func setupLogger(level string) {
-	var logLevel slog.Level
-	switch level {
-	case "debug":
-		logLevel = slog.LevelDebug
-	case "warn":
-		logLevel = slog.LevelWarn
-	case "error":
-		logLevel = slog.LevelError
-	default:
-		logLevel = slog.LevelInfo
-	}
-	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})
-	slog.SetDefault(slog.New(handler))
 }
 
 func envInt(name string, fallback int) int {

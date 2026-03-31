@@ -59,7 +59,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	testStore = store.New(testPool)
+	testStore = store.New(testPool, nil)
 
 	code := m.Run()
 	testPool.Close()

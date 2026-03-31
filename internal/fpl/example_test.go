@@ -73,7 +73,7 @@ func TestLiveAPI_Bootstrap(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), liveTimeout)
 	defer cancel()
 
-	client := fpl.NewClient(liveBaseURL, nil)
+	client := fpl.NewClient(liveBaseURL, nil, nil)
 	resp, err := client.GetBootstrap(ctx)
 	requireLiveResponse(t, "GetBootstrap", err)
 
@@ -101,7 +101,7 @@ func TestLiveAPI_EventStatus(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), liveTimeout)
 	defer cancel()
 
-	client := fpl.NewClient(liveBaseURL, nil)
+	client := fpl.NewClient(liveBaseURL, nil, nil)
 	resp, err := client.GetEventStatus(ctx)
 	requireLiveResponse(t, "GetEventStatus", err)
 
@@ -119,7 +119,7 @@ func TestLiveAPI_H2HStandings(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), liveTimeout)
 	defer cancel()
 
-	client := fpl.NewClient(liveBaseURL, nil)
+	client := fpl.NewClient(liveBaseURL, nil, nil)
 
 	// Use the Capital FC league from the project plan.
 	resp, err := client.GetAllH2HStandings(ctx, 916670)
@@ -141,7 +141,7 @@ func TestLiveAPI_ManagerHistory(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), liveTimeout)
 	defer cancel()
 
-	client := fpl.NewClient(liveBaseURL, nil)
+	client := fpl.NewClient(liveBaseURL, nil, nil)
 
 	// First, fetch the league to get a real manager ID.
 	standings, err := client.GetH2HStandings(ctx, 916670, 1)
@@ -174,7 +174,7 @@ func TestLiveAPI_H2HMatches(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), liveTimeout)
 	defer cancel()
 
-	client := fpl.NewClient(liveBaseURL, nil)
+	client := fpl.NewClient(liveBaseURL, nil, nil)
 
 	resp, err := client.GetAllH2HMatches(ctx, 916670, 1)
 	requireLiveResponse(t, "GetAllH2HMatches", err)

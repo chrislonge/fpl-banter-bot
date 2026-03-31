@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 
 	"github.com/chrislonge/fpl-banter-bot/internal/store"
@@ -46,6 +47,7 @@ type Engine struct {
 	store        Store
 	leagueID     int64
 	playerLookup PlayerLookup
+	logger       *slog.Logger
 }
 
 // CurrentStreak describes a manager's active win or loss streak.
@@ -77,15 +79,20 @@ type eventOutcome struct {
 
 // New constructs a stats engine for one league.
 func New(store Store, leagueID int64) *Engine {
-	return NewWithPlayerLookup(store, leagueID, nil)
+	return NewWithPlayerLookup(store, leagueID, nil, nil)
 }
 
-// NewWithPlayerLookup constructs a stats engine with optional player lookup.
-func NewWithPlayerLookup(store Store, leagueID int64, playerLookup PlayerLookup) *Engine {
+// NewWithPlayerLookup constructs a stats engine with optional player lookup
+// and logger. If logger is nil, slog.Default() is used.
+func NewWithPlayerLookup(store Store, leagueID int64, playerLookup PlayerLookup, logger *slog.Logger) *Engine {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &Engine{
 		store:        store,
 		leagueID:     leagueID,
 		playerLookup: playerLookup,
+		logger:       logger,
 	}
 }
 
@@ -102,6 +109,8 @@ func (e *Engine) BuildGameweekAlertsReadOnly(ctx context.Context, eventID int) (
 }
 
 func (e *Engine) buildGameweekAlerts(ctx context.Context, eventID int, persistAwards bool) ([]notify.Alert, error) {
+	e.logger.Debug("building alerts", "league_id", e.leagueID, "event_id", eventID)
+
 	managerByID, err := e.getManagerDirectory(ctx)
 	if err != nil {
 		return nil, err
@@ -241,6 +250,7 @@ func (e *Engine) buildGameweekAlerts(ctx context.Context, eventID int, persistAw
 		})
 	}
 
+	e.logger.Debug("alerts built", "league_id", e.leagueID, "event_id", eventID, "alert_count", len(alerts))
 	return alerts, nil
 }
 
@@ -355,6 +365,7 @@ func (e *Engine) getPlayerDirectory(ctx context.Context) map[int]notify.PlayerRe
 
 	playerByID, err := e.playerLookup.PlayerNames(ctx)
 	if err != nil {
+		e.logger.Warn("player lookup failed, awards will omit player names", "error", err)
 		return map[int]notify.PlayerRef{}
 	}
 	return playerByID

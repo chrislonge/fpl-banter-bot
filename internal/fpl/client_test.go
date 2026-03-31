@@ -39,8 +39,12 @@
 package fpl_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -118,7 +122,7 @@ func TestGetBootstrap(t *testing.T) {
 			// Create an FPL client pointing at our fake server.
 			// srv.Client() returns an *http.Client pre-configured to
 			// talk to this specific test server.
-			client := fpl.NewClient(srv.URL, srv.Client())
+			client := fpl.NewClient(srv.URL, srv.Client(), nil)
 
 			resp, err := client.GetBootstrap(context.Background())
 
@@ -184,7 +188,7 @@ func TestGetBootstrapFieldMapping(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := fpl.NewClient(srv.URL, srv.Client())
+	client := fpl.NewClient(srv.URL, srv.Client(), nil)
 	resp, err := client.GetBootstrap(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -253,7 +257,7 @@ func TestGetBootstrapUserAgent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := fpl.NewClient(srv.URL, srv.Client())
+	client := fpl.NewClient(srv.URL, srv.Client(), nil)
 	_, err := client.GetBootstrap(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -307,7 +311,7 @@ func TestGetEventStatus(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			client := fpl.NewClient(srv.URL, srv.Client())
+			client := fpl.NewClient(srv.URL, srv.Client(), nil)
 			resp, err := client.GetEventStatus(context.Background())
 
 			if tt.wantErr {
@@ -390,7 +394,7 @@ func TestGetH2HStandings(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			client := fpl.NewClient(srv.URL, srv.Client())
+			client := fpl.NewClient(srv.URL, srv.Client(), nil)
 			resp, err := client.GetH2HStandings(context.Background(), 916670, 1)
 
 			if tt.wantErr {
@@ -436,7 +440,7 @@ func TestGetH2HStandingsURLPath(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := fpl.NewClient(srv.URL, srv.Client())
+	client := fpl.NewClient(srv.URL, srv.Client(), nil)
 	_, err := client.GetH2HStandings(context.Background(), 916670, 3)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -489,7 +493,7 @@ func TestGetAllH2HStandings(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := fpl.NewClient(srv.URL, srv.Client())
+	client := fpl.NewClient(srv.URL, srv.Client(), nil)
 	resp, err := client.GetAllH2HStandings(context.Background(), 916670)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -590,7 +594,7 @@ func TestGetH2HMatches(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			client := fpl.NewClient(srv.URL, srv.Client())
+			client := fpl.NewClient(srv.URL, srv.Client(), nil)
 			resp, err := client.GetH2HMatches(context.Background(), 916670, 1, 1)
 
 			if tt.wantErr {
@@ -633,7 +637,7 @@ func TestGetH2HMatchesURLPath(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := fpl.NewClient(srv.URL, srv.Client())
+	client := fpl.NewClient(srv.URL, srv.Client(), nil)
 	_, err := client.GetH2HMatches(context.Background(), 916670, 3, 7)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -671,7 +675,7 @@ func TestGetAllH2HMatches(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := fpl.NewClient(srv.URL, srv.Client())
+	client := fpl.NewClient(srv.URL, srv.Client(), nil)
 	resp, err := client.GetAllH2HMatches(context.Background(), 916670, 5)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -698,7 +702,7 @@ func TestGetH2HStandings_GameUpdating503ReturnsSentinelError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := fpl.NewClient(srv.URL, srv.Client())
+	client := fpl.NewClient(srv.URL, srv.Client(), nil)
 	_, err := client.GetH2HStandings(context.Background(), 916670, 1)
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -718,7 +722,7 @@ func TestGetH2HStandings_Generic503DoesNotReturnGameUpdatingSentinel(t *testing.
 	}))
 	defer srv.Close()
 
-	client := fpl.NewClient(srv.URL, srv.Client())
+	client := fpl.NewClient(srv.URL, srv.Client(), nil)
 	_, err := client.GetH2HStandings(context.Background(), 916670, 1)
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -769,7 +773,7 @@ func TestGetManagerHistory(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			client := fpl.NewClient(srv.URL, srv.Client())
+			client := fpl.NewClient(srv.URL, srv.Client(), nil)
 			resp, err := client.GetManagerHistory(context.Background(), 12345)
 
 			if tt.wantErr {
@@ -819,7 +823,7 @@ func TestGetManagerHistoryURLPath(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := fpl.NewClient(srv.URL, srv.Client())
+	client := fpl.NewClient(srv.URL, srv.Client(), nil)
 	_, _ = client.GetManagerHistory(context.Background(), 99999)
 
 	if gotPath != "/entry/99999/history/" {
@@ -887,7 +891,7 @@ func TestGetManagerPicks(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			client := fpl.NewClient(srv.URL, srv.Client())
+			client := fpl.NewClient(srv.URL, srv.Client(), nil)
 			resp, err := client.GetManagerPicks(context.Background(), 12345, 5)
 
 			if tt.wantErr {
@@ -941,7 +945,7 @@ func TestGetManagerPicksURLPath(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := fpl.NewClient(srv.URL, srv.Client())
+	client := fpl.NewClient(srv.URL, srv.Client(), nil)
 	_, _ = client.GetManagerPicks(context.Background(), 42, 10)
 
 	if gotPath != "/entry/42/event/10/picks/" {
@@ -984,7 +988,7 @@ func TestGetEventLive(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			client := fpl.NewClient(srv.URL, srv.Client())
+			client := fpl.NewClient(srv.URL, srv.Client(), nil)
 			resp, err := client.GetEventLive(context.Background(), 5)
 
 			if tt.wantErr {
@@ -1018,7 +1022,7 @@ func TestGetEventLiveURLPath(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := fpl.NewClient(srv.URL, srv.Client())
+	client := fpl.NewClient(srv.URL, srv.Client(), nil)
 	_, _ = client.GetEventLive(context.Background(), 7)
 
 	if gotPath != "/event/7/live/" {
@@ -1042,7 +1046,7 @@ func TestContextCancellation(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := fpl.NewClient(srv.URL, srv.Client())
+	client := fpl.NewClient(srv.URL, srv.Client(), nil)
 
 	// Create a context and immediately cancel it.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1070,6 +1074,110 @@ func TestContextCancellation(t *testing.T) {
 	if _, err := client.GetManagerPicks(ctx, 1, 1); err == nil {
 		t.Error("GetManagerPicks: expected error from cancelled context, got nil")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Structured logging tests
+// ---------------------------------------------------------------------------
+
+// TestClient_LogOutput verifies that the FPL client emits structured log
+// fields (path, status, duration_ms) when a logger is injected. This uses
+// a buffer-backed slog.JSONHandler to capture output without writing to
+// stdout — the same pattern the plan specifies for verifying component
+// logging behavior.
+func TestClient_LogOutput(t *testing.T) {
+	t.Run("success path logs path, status, and duration_ms", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = fmt.Fprint(w, `{"events":[]}`)
+		}))
+		defer srv.Close()
+
+		var buf bytes.Buffer
+		logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+		client := fpl.NewClient(srv.URL, srv.Client(), logger)
+		_, _ = client.GetBootstrap(context.Background())
+
+		// Parse the log output — Debug-level success logs should contain our fields.
+		var entry map[string]any
+		if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
+			t.Fatalf("log output is not valid JSON: %v\nraw: %s", err, buf.String())
+		}
+
+		// Verify expected fields are present.
+		if entry["path"] == nil {
+			t.Error("expected 'path' field in log output")
+		}
+		if entry["status"] == nil {
+			t.Error("expected 'status' field in log output")
+		}
+		if entry["duration_ms"] == nil {
+			t.Error("expected 'duration_ms' field in log output")
+		}
+		if entry["msg"] != "fpl api call" {
+			t.Errorf("msg = %q, want %q", entry["msg"], "fpl api call")
+		}
+	})
+
+	t.Run("non-200 path logs path, status, and duration_ms", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = fmt.Fprint(w, "The game is being updated.")
+		}))
+		defer srv.Close()
+
+		var buf bytes.Buffer
+		logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+		client := fpl.NewClient(srv.URL, srv.Client(), logger)
+		_, _ = client.GetBootstrap(context.Background())
+
+		var entry map[string]any
+		if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
+			t.Fatalf("log output is not valid JSON: %v\nraw: %s", err, buf.String())
+		}
+
+		if entry["msg"] != "fpl api non-200" {
+			t.Errorf("msg = %q, want %q", entry["msg"], "fpl api non-200")
+		}
+		if entry["status"] == nil {
+			t.Error("expected 'status' field in non-200 log output")
+		}
+		if entry["duration_ms"] == nil {
+			t.Error("expected 'duration_ms' field in non-200 log output")
+		}
+	})
+
+	t.Run("network error path logs without status", func(t *testing.T) {
+		// Point at a URL that will fail immediately — closed server.
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+		srv.Close() // Close immediately to force a connection error.
+
+		var buf bytes.Buffer
+		logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+		client := fpl.NewClient(srv.URL, srv.Client(), logger)
+		_, _ = client.GetBootstrap(context.Background())
+
+		var entry map[string]any
+		if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
+			t.Fatalf("log output is not valid JSON: %v\nraw: %s", err, buf.String())
+		}
+
+		if entry["msg"] != "fpl api error" {
+			t.Errorf("msg = %q, want %q", entry["msg"], "fpl api error")
+		}
+		if entry["duration_ms"] == nil {
+			t.Error("expected 'duration_ms' field in error log output")
+		}
+		if entry["error"] == nil {
+			t.Error("expected 'error' field in error log output")
+		}
+		// Crucially: no 'status' field since resp was nil.
+		if entry["status"] != nil {
+			t.Error("expected no 'status' field in network error log output")
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------

@@ -100,6 +100,7 @@ func TestIntegration_SendAlerts(t *testing.T) {
 		&http.Client{Timeout: 10 * time.Second},
 		token,
 		chatID,
+		nil,
 	)
 
 	err := client.SendAlerts(context.Background(), alerts)

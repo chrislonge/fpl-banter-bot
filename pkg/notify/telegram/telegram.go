@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/url"
+	"time"
 
 	"github.com/chrislonge/fpl-banter-bot/pkg/notify"
 )
@@ -35,6 +39,7 @@ type Client struct {
 	httpClient *http.Client
 	apiURL     string // e.g., "https://api.telegram.org/bot<token>"
 	chatID     string
+	logger     *slog.Logger
 }
 
 // sendMessageRequest is the JSON body for the Telegram sendMessage API.
@@ -67,20 +72,28 @@ func (e *APIError) Error() string {
 //   - httpClient: the HTTP transport (caller owns timeout config).
 //   - token: the bot token from @BotFather.
 //   - chatID: the target chat (negative for groups).
-func New(httpClient *http.Client, token string, chatID string) *Client {
+func New(httpClient *http.Client, token string, chatID string, logger *slog.Logger) *Client {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &Client{
 		httpClient: httpClient,
 		apiURL:     "https://api.telegram.org/bot" + token,
 		chatID:     chatID,
+		logger:     logger,
 	}
 }
 
 // newWithURL creates a Client with a custom API URL (for tests with httptest).
-func newWithURL(httpClient *http.Client, apiURL string, chatID string) *Client {
+func newWithURL(httpClient *http.Client, apiURL string, chatID string, logger *slog.Logger) *Client {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &Client{
 		httpClient: httpClient,
 		apiURL:     apiURL,
 		chatID:     chatID,
+		logger:     logger,
 	}
 }
 
@@ -119,9 +132,25 @@ func (c *Client) postJSON(ctx context.Context, method string, payload any) error
 		req.Header.Set("Content-Type", "application/json")
 	}
 
+	// Duration logging with separate paths — resp is nil on network errors.
+	// Security: only log method, status_code, duration_ms. Never log apiURL
+	// (contains bot token), headers, or request/response bodies.
+	start := time.Now()
 	resp, err := c.httpClient.Do(req)
+	duration := time.Since(start).Milliseconds()
+
+	// Network error — resp is nil, no status to log.
+	// Unwrap *url.Error to strip the request URL (which contains the bot
+	// token) from logs and propagated errors. uerr.Err holds the
+	// underlying transport/DNS cause without the URL.
 	if err != nil {
-		return fmt.Errorf("calling %s: %w", method, err)
+		logErr := err
+		var uerr *url.Error
+		if errors.As(err, &uerr) {
+			logErr = uerr.Err
+		}
+		c.logger.Warn("telegram api error", "method", method, "duration_ms", duration, "error", logErr)
+		return fmt.Errorf("calling %s: %w", method, logErr)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -137,6 +166,7 @@ func (c *Client) postJSON(ctx context.Context, method string, payload any) error
 	// of what the JSON body says. This prevents a pathological case where
 	// a non-200 response contains parseable JSON with ok: true.
 	if resp.StatusCode != http.StatusOK {
+		c.logger.Warn("telegram api non-200", "method", method, "status_code", resp.StatusCode, "duration_ms", duration)
 		var tgResp telegramResponse
 		if err := json.Unmarshal(respBody, &tgResp); err == nil && tgResp.Description != "" {
 			return &APIError{StatusCode: resp.StatusCode, Description: tgResp.Description}
@@ -152,6 +182,7 @@ func (c *Client) postJSON(ctx context.Context, method string, payload any) error
 		return &APIError{StatusCode: resp.StatusCode, Description: tgResp.Description}
 	}
 
+	c.logger.Debug("telegram api call", "method", method, "status_code", resp.StatusCode, "duration_ms", duration)
 	return nil
 }
 

@@ -118,7 +118,7 @@ func singleAlert() []notify.Alert {
 
 func TestSendAlerts_Success(t *testing.T) {
 	server, received := testServer(t, http.StatusOK, `{"ok": true}`)
-	client := newWithURL(server.Client(), server.URL, "-12345")
+	client := newWithURL(server.Client(), server.URL, "-12345", nil)
 
 	err := client.SendAlerts(context.Background(), singleAlert())
 	if err != nil {
@@ -149,7 +149,7 @@ func TestSendAlerts_Success(t *testing.T) {
 
 func TestSendAlerts_MultipleChunks(t *testing.T) {
 	server, received := testServer(t, http.StatusOK, `{"ok": true}`)
-	client := newWithURL(server.Client(), server.URL, "-12345")
+	client := newWithURL(server.Client(), server.URL, "-12345", nil)
 
 	// Generate enough alerts to force multiple chunks.
 	var alerts []notify.Alert
@@ -191,7 +191,7 @@ func TestSendAlerts_MultipleChunks(t *testing.T) {
 func TestSendAlerts_Non200Status(t *testing.T) {
 	server, _ := testServer(t, http.StatusInternalServerError,
 		`{"ok": false, "description": "Internal Server Error"}`)
-	client := newWithURL(server.Client(), server.URL, "-12345")
+	client := newWithURL(server.Client(), server.URL, "-12345", nil)
 
 	err := client.SendAlerts(context.Background(), singleAlert())
 	if err == nil {
@@ -210,7 +210,7 @@ func TestSendAlerts_Non200Status(t *testing.T) {
 func TestSendAlerts_TelegramOKFalse(t *testing.T) {
 	server, _ := testServer(t, http.StatusBadRequest,
 		`{"ok": false, "description": "Bad Request: chat not found"}`)
-	client := newWithURL(server.Client(), server.URL, "-12345")
+	client := newWithURL(server.Client(), server.URL, "-12345", nil)
 
 	err := client.SendAlerts(context.Background(), singleAlert())
 	if err == nil {
@@ -228,7 +228,7 @@ func TestSendAlerts_TelegramOKFalse(t *testing.T) {
 
 func TestSendAlerts_RequestBodyContainsChatID(t *testing.T) {
 	server, received := testServer(t, http.StatusOK, `{"ok": true}`)
-	client := newWithURL(server.Client(), server.URL, "-9876543210")
+	client := newWithURL(server.Client(), server.URL, "-9876543210", nil)
 
 	err := client.SendAlerts(context.Background(), singleAlert())
 	if err != nil {
@@ -245,7 +245,7 @@ func TestSendAlerts_RequestBodyContainsChatID(t *testing.T) {
 
 func TestSendAlerts_ParseModeIsHTML(t *testing.T) {
 	server, received := testServer(t, http.StatusOK, `{"ok": true}`)
-	client := newWithURL(server.Client(), server.URL, "-12345")
+	client := newWithURL(server.Client(), server.URL, "-12345", nil)
 
 	err := client.SendAlerts(context.Background(), singleAlert())
 	if err != nil {
@@ -262,7 +262,7 @@ func TestSendAlerts_ParseModeIsHTML(t *testing.T) {
 
 func TestSendAlerts_EmptyAlerts(t *testing.T) {
 	server, received := testServer(t, http.StatusOK, `{"ok": true}`)
-	client := newWithURL(server.Client(), server.URL, "-12345")
+	client := newWithURL(server.Client(), server.URL, "-12345", nil)
 
 	err := client.SendAlerts(context.Background(), nil)
 	if err != nil {
@@ -278,7 +278,7 @@ func TestSendAlerts_ContextCancellation(t *testing.T) {
 	// Create a server that always succeeds — but we'll cancel the context
 	// before the request is sent.
 	server, _ := testServer(t, http.StatusOK, `{"ok": true}`)
-	client := newWithURL(server.Client(), server.URL, "-12345")
+	client := newWithURL(server.Client(), server.URL, "-12345", nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately.
@@ -298,7 +298,7 @@ func TestSendAlerts_ContextCancellation(t *testing.T) {
 
 func TestSetMyCommands_Success(t *testing.T) {
 	server, received := rawTestServer(t, http.StatusOK, `{"ok": true}`)
-	client := newWithURL(server.Client(), server.URL, "-12345")
+	client := newWithURL(server.Client(), server.URL, "-12345", nil)
 
 	commands := []BotCommand{
 		{Command: "standings", Description: "Current league standings"},
@@ -344,7 +344,7 @@ func TestSetMyCommands_Success(t *testing.T) {
 
 func TestSetMyCommands_NilScope(t *testing.T) {
 	server, received := rawTestServer(t, http.StatusOK, `{"ok": true}`)
-	client := newWithURL(server.Client(), server.URL, "-12345")
+	client := newWithURL(server.Client(), server.URL, "-12345", nil)
 
 	commands := []BotCommand{
 		{Command: "standings", Description: "Current league standings"},
@@ -372,7 +372,7 @@ func TestSetMyCommands_NilScope(t *testing.T) {
 func TestSetMyCommands_APIError(t *testing.T) {
 	server, _ := rawTestServer(t, http.StatusBadRequest,
 		`{"ok": false, "description": "Bad Request: invalid command"}`)
-	client := newWithURL(server.Client(), server.URL, "-12345")
+	client := newWithURL(server.Client(), server.URL, "-12345", nil)
 
 	err := client.SetMyCommands(context.Background(), []BotCommand{
 		{Command: "standings", Description: "test"},
@@ -392,7 +392,7 @@ func TestSetMyCommands_APIError(t *testing.T) {
 
 func TestDeleteMyCommands_Success(t *testing.T) {
 	server, received := rawTestServer(t, http.StatusOK, `{"ok": true}`)
-	client := newWithURL(server.Client(), server.URL, "-12345")
+	client := newWithURL(server.Client(), server.URL, "-12345", nil)
 
 	// nil scope targets the default scope.
 	err := client.DeleteMyCommands(context.Background(), nil)
@@ -410,7 +410,7 @@ func TestDeleteMyCommands_Success(t *testing.T) {
 
 func TestDeleteMyCommands_WithChatScope(t *testing.T) {
 	server, received := rawTestServer(t, http.StatusOK, `{"ok": true}`)
-	client := newWithURL(server.Client(), server.URL, "-12345")
+	client := newWithURL(server.Client(), server.URL, "-12345", nil)
 
 	scope := &BotCommandScope{Type: "chat", ChatID: -12345}
 	err := client.DeleteMyCommands(context.Background(), scope)
