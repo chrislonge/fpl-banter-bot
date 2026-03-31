@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	// Embed the IANA timezone database into the binary so that
@@ -173,8 +174,10 @@ func Load() (Config, error) {
 }
 
 // getEnvOrDefault returns the value of an env var, or a default if unset.
+// The value is trimmed of surrounding whitespace so that inline comments in
+// .env files (e.g. LOG_FORMAT=text   # description) don't corrupt the value.
 func getEnvOrDefault(key, defaultVal string) string {
-	if v := os.Getenv(key); v != "" {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v
 	}
 	return defaultVal
