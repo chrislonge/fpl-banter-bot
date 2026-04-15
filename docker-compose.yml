@@ -18,7 +18,7 @@ services:
       retries: 5
 
   bot:
-    build: .
+    image: ghcr.io/chrislonge/fpl-banter-bot:0.5
     restart: unless-stopped
     env_file: .env
     ports:
@@ -34,7 +34,7 @@ services:
   # `docker compose up`. You must either use `run` (which ignores
   # profiles) or `docker compose --profile tools up backfill`.
   backfill:
-    build: .
+    image: ghcr.io/chrislonge/fpl-banter-bot:0.5
     entrypoint: ["/backfill"]
     env_file: .env
     profiles: ["tools"]
