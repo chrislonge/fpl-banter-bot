@@ -319,6 +319,33 @@ make docker-backfill
 
 If your bot runs in containers, set `DATABASE_URL` to use the Postgres service name from Compose, for example `postgres://fplbot:password@db:5432/fplbanterbot?sslmode=disable`.
 
+## Cutting a Release
+
+Releases are cut from `main`. CI automatically builds and pushes an ARM64 Docker image to GHCR on every version tag.
+
+```bash
+make release VERSION=0.6.0
+```
+
+This will:
+1. Run `lint` and `test` as a local sanity check
+2. Bump the image tag in `docker-compose.yml` to the new `major.minor`
+3. Commit, tag `v0.6.0`, and push both to `origin`
+
+CI then builds `ghcr.io/chrislonge/fpl-banter-bot:0.6.0`, `0.6`, and attests build provenance. Monitor the run in GitHub → Actions.
+
+**Patch releases** (e.g. `0.5.0` → `0.5.1`) do not require a `docker-compose.yml` change — the `0.5` tag already tracks the latest patch. Just commit the fix and run `make release VERSION=0.5.1`.
+
+**Access control:** Pushes to `v*` tags are protected by a GitHub ruleset — only the repo owner can create or delete release tags. Add bypass permission explicitly in Settings → Rules → Release tags if you add collaborators who need to cut releases.
+
+**Deploying to the Pi after a release:**
+
+```bash
+git pull
+docker compose pull bot
+docker compose stop bot && docker compose up -d bot
+```
+
 ## Limitations
 
 - Head-to-head leagues only

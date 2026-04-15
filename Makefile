@@ -3,7 +3,7 @@
 -include .env
 export
 
-.PHONY: build test test-store test-telegram test-all lint run backfill docker-backfill notify-test db-up db-down db-reset deploy
+.PHONY: build test test-store test-telegram test-all lint run backfill docker-backfill notify-test db-up db-down db-reset deploy release
 
 ## Build the bot binary
 build:
@@ -38,13 +38,25 @@ backfill:
 	go run ./cmd/backfill
 
 ## Backfill via Docker Compose (used on Pi or any Docker deployment).
-## `--build` keeps the one-shot tool image in sync with the latest code.
 docker-backfill:
-	docker compose run --rm --build backfill
+	docker compose run --rm backfill
 
 ## Build and start the full stack (db + bot) in detached mode
 deploy:
-	docker compose up -d --build
+	docker compose up -d
+
+## Cut a release. Bumps docker-compose.yml to the new major.minor, commits,
+## tags, and pushes. CI builds and pushes the ARM64 Docker image on tag push.
+## Usage: make release VERSION=0.6.0
+release: lint test
+	@test -n "$(VERSION)" || (echo "Error: VERSION is required. Usage: make release VERSION=x.y.z"; exit 1)
+	$(eval MINOR := $(shell echo $(VERSION) | cut -d. -f1,2))
+	sed -i '' 's|fpl-banter-bot:[0-9]*\.[0-9]*|fpl-banter-bot:$(MINOR)|g' docker-compose.yml
+	git add docker-compose.yml
+	git commit -m "Release v$(VERSION)"
+	git tag v$(VERSION)
+	git push origin main
+	git push origin v$(VERSION)
 
 ## Test the full stats → notify pipeline with real DB data (host-side tool)
 ## Usage: make notify-test              (latest gameweek)

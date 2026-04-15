@@ -94,6 +94,17 @@ make db-reset       # destroy + recreate (needed after schema changes)
 
 Migrations run automatically on bot startup via embedded SQL files. The `golang-migrate` CLI is optional (manual rollbacks only).
 
+### Release Process
+
+```bash
+make release VERSION=0.6.0   # runs lint + test, bumps docker-compose.yml, commits, tags, and pushes
+```
+
+- **Patch releases** (`0.5.0` → `0.5.1`): commit the fix, then `make release VERSION=0.5.1` — `docker-compose.yml` does not need changing since `0.5` already tracks the latest patch
+- **Minor/major releases**: `make release` bumps the `major.minor` tag in `docker-compose.yml` automatically
+- CI builds the ARM64 image and pushes to GHCR on every `v*` tag push
+- Tag pushes are protected by a GitHub ruleset — only the repo owner can push `v*` tags
+
 ## Environment Variables
 
 See `.env.example` for the full list. Copy to `.env` for local values (gitignored). The Makefile loads `.env` automatically.
