@@ -745,6 +745,53 @@ func TestTick_FinalizationAdvancesGuard(t *testing.T) {
 	}
 }
 
+// TestTick_LiveStateRefreshesBootstrap is a regression test for a bug where
+// the poller would stay stuck in StateLive forever. The root cause: bootstrap
+// was only refreshed during StateIdle, but event.Finished (the field that
+// drives the StateLive → StateProcessing transition) lives in the bootstrap
+// response. Once the poller entered StateLive, it read stale data every tick.
+//
+// This test verifies that a bootstrap update (Finished changing from false to
+// true) is observed during StateLive, causing the correct state transition.
+func TestTick_LiveStateRefreshesBootstrap(t *testing.T) {
+	fc := &fakeFPLClient{
+		bootstrap: fpl.BootstrapResponse{
+			Events: []fpl.Event{
+				{ID: 32, IsCurrent: true, Finished: false, DeadlineTime: pastDeadline()},
+			},
+		},
+		// BonusAdded: false keeps the poller in StateProcessing rather than
+		// triggering full finalization (which would require standings/histories/picks).
+		eventStatus: fpl.EventStatusResponse{
+			Status:  []fpl.EventStatus{{Event: 32, BonusAdded: false}},
+			Leagues: "Updating",
+		},
+	}
+	fs := &fakeStore{}
+
+	p := newTestPoller(fc, fs, nil)
+
+	// Tick 1: bootstrap returns Finished: false → should stay StateLive.
+	if err := p.tick(context.Background()); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	if p.state != StateLive {
+		t.Fatalf("state after tick 1 = %q, want %q", p.state, StateLive)
+	}
+
+	// Simulate the FPL API updating: fixtures are now done.
+	fc.bootstrap.Events[0].Finished = true
+
+	// Tick 2: bootstrap should be re-fetched, Finished: true is seen,
+	// and the poller should advance to StateProcessing.
+	if err := p.tick(context.Background()); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	if p.state != StateProcessing {
+		t.Errorf("state after tick 2 = %q, want %q (bootstrap was not refreshed in StateLive)", p.state, StateProcessing)
+	}
+}
+
 // TestTick_FinalizationPersistsCorrectData verifies the data that flows
 // through the finalization pipeline: league, managers, standings, chips.
 func TestTick_FinalizationPersistsCorrectData(t *testing.T) {

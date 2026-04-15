@@ -255,8 +255,12 @@ func (p *Poller) Run(ctx context.Context) error {
 func (p *Poller) tick(ctx context.Context) error {
 	// Step 1: Refresh bootstrap if needed.
 	// During IDLE we always refresh to detect when a new GW becomes current.
-	// Otherwise we only fetch it once (on first tick).
-	if p.bootstrap == nil || p.state == StateIdle {
+	// During LIVE we also refresh every tick because event.Finished (the field
+	// that signals all fixtures are done) lives in the bootstrap response — without
+	// refreshing here, the poller would stay live forever even after fixtures finish.
+	// During PROCESSING, bootstrap is stable; we skip the 1.3MB fetch and rely on
+	// event-status instead.
+	if p.bootstrap == nil || p.state == StateIdle || p.state == StateLive {
 		if err := p.refreshBootstrap(ctx); err != nil {
 			return fmt.Errorf("refreshing bootstrap: %w", err)
 		}
