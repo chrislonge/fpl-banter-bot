@@ -287,6 +287,23 @@ make test-telegram
 
 The bot uses structured logging via Go's `slog` package. Set `LOG_FORMAT` to control the output format.
 
+#### Docker deployments
+
+```bash
+# Follow live output
+docker compose logs -f bot
+
+# Last 100 lines then follow
+docker compose logs -f --tail=100 bot
+
+# Logs since a point in time
+docker compose logs --since=1h bot
+```
+
+Postgres logs are available via `docker compose logs db`.
+
+#### Local development
+
 `LOG_FORMAT=text` (default) produces human-readable output, good for local development:
 
 ```
