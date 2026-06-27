@@ -44,6 +44,11 @@ type Config struct {
 	PollLiveInterval       int
 	PollProcessingInterval int
 
+	// Off-season / read-only mode. When false, the poller never starts and
+	// no FPL API calls are made — the bot only serves stored history via the
+	// Telegram commands. Defaults to true (normal in-season operation).
+	PollerEnabled bool
+
 	// Logging
 	LogLevel  string
 	LogFormat string // "text" (default) or "json"
@@ -167,6 +172,7 @@ func Load() (Config, error) {
 		PollIdleInterval:       getEnvAsIntOrDefault("POLL_IDLE_INTERVAL", 21600),
 		PollLiveInterval:       getEnvAsIntOrDefault("POLL_LIVE_INTERVAL", 900),
 		PollProcessingInterval: getEnvAsIntOrDefault("POLL_PROCESSING_INTERVAL", 600),
+		PollerEnabled:          getEnvAsBoolOrDefault("POLLER_ENABLED", true),
 		LogLevel:               logLevel,
 		LogFormat:              logFormat,
 		DeadlineTimezone:       deadlineTZ,
@@ -240,4 +246,24 @@ func getEnvAsIntOrDefault(key string, defaultVal int) int {
 		return defaultVal
 	}
 	return i
+}
+
+// getEnvAsBoolOrDefault returns an env var parsed as bool, or a default.
+// It accepts the values strconv.ParseBool understands (1/0, t/f, true/false,
+// case-insensitive). If the var is unset or invalid, the default is returned.
+//
+// The value is trimmed of surrounding whitespace (like getEnvOrDefault) so that
+// a stray space in a .env file (e.g. "POLLER_ENABLED=false ") doesn't fail to
+// parse and silently fall back to the default — which for POLLER_ENABLED would
+// unexpectedly re-enable the poller.
+func getEnvAsBoolOrDefault(key string, defaultVal bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return defaultVal
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return defaultVal
+	}
+	return b
 }

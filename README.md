@@ -188,6 +188,7 @@ All configuration comes from environment variables. See [`.env.example`](.env.ex
 | `POLL_IDLE_INTERVAL` | No | Seconds between polls when no gameweek is live |
 | `POLL_LIVE_INTERVAL` | No | Seconds between polls during a live gameweek |
 | `POLL_PROCESSING_INTERVAL` | No | Seconds between polls while FPL is still processing results |
+| `POLLER_ENABLED` | No | `false` enables off-season read-only mode (no FPL polling). Default `true` |
 | `DEADLINE_TIMEZONE` | No | IANA timezone for `/deadline` |
 | `LOG_LEVEL` | No | `debug`, `info`, `warn`, or `error` |
 | `LOG_FORMAT` | No | `text` (human-readable) or `json` (structured). Default `text` |
@@ -335,6 +336,23 @@ make docker-backfill
 `make docker-backfill` rebuilds the one-shot backfill image before running it, which keeps it in sync with the latest checked-out code.
 
 If your bot runs in containers, set `DATABASE_URL` to use the Postgres service name from Compose, for example `postgres://fplbot:password@db:5432/fplbanterbot?sslmode=disable`.
+
+### Off-season (read-only) mode
+
+Once the season ends there is no new FPL data to collect, but your group may still want to query the season's history. Set `POLLER_ENABLED=false` to run the bot in read-only mode:
+
+- The poller never starts and the startup FPL smoke-test is skipped, so the bot makes **no FPL API calls** at all.
+- The Telegram webhook server keeps running, so `/standings`, `/streak`, and `/history` continue to answer from the database.
+- `/deadline` (the only command that would otherwise hit FPL) returns a static "season's over" message and is removed from the command suggestions.
+
+To enter off-season mode on an existing deployment, set the variable and restart the bot:
+
+```bash
+echo 'POLLER_ENABLED=false' >> .env
+docker compose up -d bot
+```
+
+Remove the variable (or set it back to `true`) and restart to resume normal polling for the next season.
 
 ## Cutting a Release
 

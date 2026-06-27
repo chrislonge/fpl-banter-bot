@@ -115,6 +115,7 @@ See `.env.example` for the full list. Copy to `.env` for local values (gitignore
 - `STORE_TEST_DATABASE_URL` — Test database connection string (for `make test-store`)
 - `FPL_LEAGUE_ID` — FPL league ID
 - `FPL_LEAGUE_TYPE` — `h2h` or `classic`
+- `POLLER_ENABLED` — `false` for off-season read-only mode (no FPL polling; bot still serves stored history). Default `true`
 
 ## After Implementing a Plan
 

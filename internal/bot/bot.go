@@ -110,6 +110,7 @@ type Config struct {
 	WebhookBaseURL   string
 	WebhookSecret    string
 	DeadlineTimezone *time.Location // resolved IANA timezone for /deadline display
+	SeasonOver       bool           // true in off-season mode: /deadline returns a static message instead of calling FPL
 	Logger           *slog.Logger   // if nil, slog.Default() is used
 }
 
@@ -129,6 +130,7 @@ type Handler struct {
 	webhookSecret    string
 	webhookURL       string         // full registered URL: base + /webhook/ + secret
 	deadlineTimezone *time.Location // IANA timezone for /deadline display
+	seasonOver       bool           // off-season mode: /deadline short-circuits, no FPL call
 }
 
 // New creates a Handler with all its dependencies.
@@ -172,6 +174,7 @@ func New(
 		webhookSecret:    cfg.WebhookSecret,
 		webhookURL:       webhookURL,
 		deadlineTimezone: tz,
+		seasonOver:       cfg.SeasonOver,
 	}
 }
 
@@ -340,6 +343,11 @@ func (h *Handler) dispatchCommand(ctx context.Context, command string, args []st
 	case "/" + CmdHistory:
 		return handleHistory(ctx, h.stats, h.store, h.leagueID, args)
 	case "/" + CmdDeadline:
+		// In off-season mode we never call the FPL API. Return a static
+		// message instead of fetching the (non-existent) next deadline.
+		if h.seasonOver {
+			return "🏆 The season's over — no upcoming deadlines. See you next year!", nil
+		}
 		return handleDeadline(ctx, h.fpl, h.deadlineTimezone)
 	default:
 		// Unknown command — return empty string to silently ignore.
