@@ -114,6 +114,17 @@ func (f *fakeFPLQuerier) GetBootstrap(_ context.Context) (fpl.BootstrapResponse,
 	return f.bootstrap, f.err
 }
 
+// recordingFPLQuerier records whether GetBootstrap was ever called. Used to
+// prove that off-season mode makes no FPL calls.
+type recordingFPLQuerier struct {
+	called bool
+}
+
+func (f *recordingFPLQuerier) GetBootstrap(_ context.Context) (fpl.BootstrapResponse, error) {
+	f.called = true
+	return fpl.BootstrapResponse{}, nil
+}
+
 type fakePollerStatus struct {
 	state     string
 	lastEvent int
@@ -276,6 +287,53 @@ func TestDispatchCommand(t *testing.T) {
 				t.Errorf("expected empty response, got %q", response)
 			}
 		})
+	}
+}
+
+// TestDispatchCommand_DeadlineOffSeason verifies that in off-season mode the
+// /deadline command returns a static message WITHOUT calling the FPL API.
+// This is the core guarantee of read-only mode: zero outbound FPL traffic.
+func TestDispatchCommand_DeadlineOffSeason(t *testing.T) {
+	fq := &recordingFPLQuerier{}
+	h := New(&fakeTelegramBot{}, &fakeStatsQuerier{}, &fakeLeagueStore{}, fq, &fakePollerStatus{}, Config{
+		LeagueID:         916670,
+		ChatID:           "-12345",
+		WebhookBaseURL:   "https://example.com",
+		WebhookSecret:    "test-secret",
+		DeadlineTimezone: mustLoadLocation("Europe/London"),
+		SeasonOver:       true,
+	})
+
+	response, err := h.dispatchCommand(context.Background(), "/deadline", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fq.called {
+		t.Error("GetBootstrap was called in off-season mode — expected zero FPL calls")
+	}
+	if !strings.Contains(response, "season's over") {
+		t.Errorf("response = %q, want season-over message", response)
+	}
+}
+
+// TestDispatchCommand_DeadlineInSeason is the counterpart: in normal mode
+// /deadline DOES call the FPL API.
+func TestDispatchCommand_DeadlineInSeason(t *testing.T) {
+	fq := &recordingFPLQuerier{}
+	h := New(&fakeTelegramBot{}, &fakeStatsQuerier{}, &fakeLeagueStore{}, fq, &fakePollerStatus{}, Config{
+		LeagueID:         916670,
+		ChatID:           "-12345",
+		WebhookBaseURL:   "https://example.com",
+		WebhookSecret:    "test-secret",
+		DeadlineTimezone: mustLoadLocation("Europe/London"),
+		SeasonOver:       false,
+	})
+
+	if _, err := h.dispatchCommand(context.Background(), "/deadline", nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fq.called {
+		t.Error("GetBootstrap was not called in normal mode — expected an FPL call")
 	}
 }
 

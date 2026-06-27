@@ -115,12 +115,21 @@ func main() {
 	// Smoke-test the FPL API on startup, same "fail fast" pattern as the
 	// database ping. If the API is unreachable, we want to know immediately
 	// rather than discovering it when the first gameweek finalizes.
-	status, err := fplClient.GetEventStatus(ctx)
-	if err != nil {
-		mainLog.Error("failed to reach FPL API", "error", err)
-		os.Exit(1)
+	//
+	// In off-season mode (POLLER_ENABLED=false) we make no FPL calls at all,
+	// so we skip this check — otherwise the bot would crash-loop if FPL were
+	// briefly unreachable, even though it only needs the database to serve
+	// stored history.
+	if cfg.PollerEnabled {
+		status, err := fplClient.GetEventStatus(ctx)
+		if err != nil {
+			mainLog.Error("failed to reach FPL API", "error", err)
+			os.Exit(1)
+		}
+		mainLog.Info("FPL API reachable", "leagues_status", status.Leagues)
+	} else {
+		mainLog.Info("off-season mode: skipping FPL smoke-test and poller (read-only)")
 	}
-	mainLog.Info("FPL API reachable", "leagues_status", status.Leagues)
 
 	// Run database migrations. The SQL files are embedded in the binary
 	// via //go:embed, so there are no external files to deploy.
@@ -200,12 +209,20 @@ func main() {
 		// Register bot commands scoped to the configured chat.
 		// Using chat scope prevents commands from appearing in other chats
 		// where the bot would silently ignore them (see handleUpdate chat ID filter).
-		tgCmds := make([]telegram.BotCommand, len(bot.Commands))
-		for i, cmd := range bot.Commands {
-			tgCmds[i] = telegram.BotCommand{
+		//
+		// In off-season mode we drop /deadline from the registered list so it
+		// stops being suggested in the chat — it would only return a static
+		// "season's over" message. The dispatch case is kept as a fallback for
+		// anyone who types it manually.
+		tgCmds := make([]telegram.BotCommand, 0, len(bot.Commands))
+		for _, cmd := range bot.Commands {
+			if !cfg.PollerEnabled && cmd.Name == bot.CmdDeadline {
+				continue
+			}
+			tgCmds = append(tgCmds, telegram.BotCommand{
 				Command:     cmd.Name,
 				Description: cmd.Description,
-			}
+			})
 		}
 		chatID, err := strconv.ParseInt(cfg.TelegramChatID, 10, 64)
 		if err != nil {
@@ -254,8 +271,12 @@ func main() {
 	// we need structured concurrency to ensure clean shutdown of both.
 	g, gctx := errgroup.WithContext(ctx)
 
-	mainLog.Info("starting poller")
-	g.Go(func() error { return p.Run(gctx) })
+	// In off-season mode the poller is never started, so no FPL calls are
+	// made. The bot still serves stored history via the webhook commands.
+	if cfg.PollerEnabled {
+		mainLog.Info("starting poller")
+		g.Go(func() error { return p.Run(gctx) })
+	}
 
 	if cfg.TelegramConfigured {
 		mainLog.Info("webhook configured", "base_url", cfg.WebhookBaseURL)
@@ -280,11 +301,20 @@ func main() {
 				WebhookBaseURL:   cfg.WebhookBaseURL,
 				WebhookSecret:    cfg.WebhookSecret,
 				DeadlineTimezone: cfg.DeadlineTimezone,
+				SeasonOver:       !cfg.PollerEnabled,
 				Logger:           botLog,
 			},
 		)
 
 		g.Go(func() error { return botServer.RunServer(gctx) })
+	}
+
+	// Guard against a no-op configuration: if the poller is disabled and
+	// Telegram is not configured, there's nothing for g.Wait() to wait on and
+	// the process would exit immediately. Surface this clearly rather than
+	// exiting silently with "shutdown complete".
+	if !cfg.PollerEnabled && !cfg.TelegramConfigured {
+		mainLog.Warn("nothing to run: poller disabled and Telegram not configured; exiting")
 	}
 
 	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {

@@ -419,3 +419,72 @@ func TestSetupLogger(t *testing.T) {
 		}
 	})
 }
+
+func TestGetEnvAsBoolOrDefault(t *testing.T) {
+	const key = "TEST_BOOL_FLAG"
+
+	tests := []struct {
+		name       string
+		set        bool   // whether to set the env var at all
+		value      string // value when set
+		defaultVal bool
+		want       bool
+	}{
+		{name: "unset returns default true", set: false, defaultVal: true, want: true},
+		{name: "unset returns default false", set: false, defaultVal: false, want: false},
+		{name: "explicit false", set: true, value: "false", defaultVal: true, want: false},
+		{name: "explicit true", set: true, value: "true", defaultVal: false, want: true},
+		{name: "numeric 0", set: true, value: "0", defaultVal: true, want: false},
+		{name: "numeric 1", set: true, value: "1", defaultVal: false, want: true},
+		{name: "garbage returns default", set: true, value: "yesplease", defaultVal: true, want: true},
+		{name: "empty string returns default", set: true, value: "", defaultVal: true, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.set {
+				t.Setenv(key, tt.value)
+			} else {
+				// Ensure no leakage from a previous subtest's t.Setenv.
+				t.Setenv(key, "")
+			}
+			if got := getEnvAsBoolOrDefault(key, tt.defaultVal); got != tt.want {
+				t.Errorf("getEnvAsBoolOrDefault(%q, %v) = %v, want %v", tt.value, tt.defaultVal, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoad_PollerEnabled(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string // POLLER_ENABLED; empty means unset
+		want  bool
+	}{
+		{name: "defaults to true when unset", value: "", want: true},
+		{name: "false disables poller", value: "false", want: false},
+		{name: "true enables poller", value: "true", want: true},
+		{name: "invalid falls back to default true", value: "nope", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("DATABASE_URL", "postgres://test@localhost/test")
+			t.Setenv("FPL_LEAGUE_ID", "123")
+			// Clear Telegram vars so a loaded .env doesn't trigger the
+			// "WEBHOOK_BASE_URL required" validation — this test only cares
+			// about POLLER_ENABLED parsing.
+			t.Setenv("TELEGRAM_BOT_TOKEN", "")
+			t.Setenv("TELEGRAM_CHAT_ID", "")
+			t.Setenv("POLLER_ENABLED", tt.value)
+
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.PollerEnabled != tt.want {
+				t.Errorf("PollerEnabled = %v, want %v", cfg.PollerEnabled, tt.want)
+			}
+		})
+	}
+}
