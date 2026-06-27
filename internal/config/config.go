@@ -251,8 +251,13 @@ func getEnvAsIntOrDefault(key string, defaultVal int) int {
 // getEnvAsBoolOrDefault returns an env var parsed as bool, or a default.
 // It accepts the values strconv.ParseBool understands (1/0, t/f, true/false,
 // case-insensitive). If the var is unset or invalid, the default is returned.
+//
+// The value is trimmed of surrounding whitespace (like getEnvOrDefault) so that
+// a stray space in a .env file (e.g. "POLLER_ENABLED=false ") doesn't fail to
+// parse and silently fall back to the default — which for POLLER_ENABLED would
+// unexpectedly re-enable the poller.
 func getEnvAsBoolOrDefault(key string, defaultVal bool) bool {
-	v := os.Getenv(key)
+	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
 		return defaultVal
 	}

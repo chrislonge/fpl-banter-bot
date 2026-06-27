@@ -438,6 +438,7 @@ func TestGetEnvAsBoolOrDefault(t *testing.T) {
 		{name: "numeric 1", set: true, value: "1", defaultVal: false, want: true},
 		{name: "garbage returns default", set: true, value: "yesplease", defaultVal: true, want: true},
 		{name: "empty string returns default", set: true, value: "", defaultVal: true, want: true},
+		{name: "surrounding whitespace is trimmed", set: true, value: "  false  ", defaultVal: true, want: false},
 	}
 
 	for _, tt := range tests {
@@ -449,7 +450,8 @@ func TestGetEnvAsBoolOrDefault(t *testing.T) {
 				t.Setenv(key, "")
 			}
 			if got := getEnvAsBoolOrDefault(key, tt.defaultVal); got != tt.want {
-				t.Errorf("getEnvAsBoolOrDefault(%q, %v) = %v, want %v", tt.value, tt.defaultVal, got, tt.want)
+				t.Errorf("getEnvAsBoolOrDefault(%q, %v) with env=%q = %v, want %v",
+					key, tt.defaultVal, tt.value, got, tt.want)
 			}
 		})
 	}
